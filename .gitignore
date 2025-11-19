@@ -1,0 +1,5 @@
+checkpoints/*.pth
+pretrained_weights/*.pt
+tensorboard_runs
+res
+supp

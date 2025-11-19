@@ -1,0 +1,28 @@
+Project_name: "TE_ref_overlap_MSE_512"
+
+## Connector model config
+projector_kwargs:
+  exp:
+    mm_projector_type: "mlp2x_gelu"
+    mm_hidden_size: 1024
+    hidden_size: 10
+
+transformer_kwargs:
+  T: 5
+  hidden_size: 1024
+  nlayer: 4
+  nhead: 4
+  dim_feedforward: 1024
+  dropout: 0.1
+
+## training configs
+checkpoint_dir: "./checkpoints"
+num_epochs: 10000
+evaluate_interval: 1000
+checkpoint_interval: 1000
+weight_dtype: 'fp32'
+batch_size: 128
+batch_size_val: 128
+num_workers: 4
+lr: 1e-4
+weight_decay: 1e-5

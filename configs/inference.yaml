@@ -1,0 +1,45 @@
+## dependency models
+emotion2vec_model_id: "iic/emotion2vec_plus_large"
+audio2lip_model_path: "./pretrained_weights/Audio2Lip.pt"
+pretrained_EDTalk:
+  model_path: "./pretrained_weights/EDTalk.pt"
+  size: 256
+  latent_dim_style: 512
+  latent_dim_lip: 20
+  latent_dim_pose: 6
+  latent_dim_exp: 10
+  channel_multiplier: 1
+
+## Connector model config
+projector_kwargs:
+  path:
+  exp:
+    mm_projector_type: "mlp2x_gelu"
+    mm_hidden_size: 1024
+    hidden_size: 10
+  speaker:
+    mm_projector_type: "mlp2x_gelu"
+    mm_hidden_size: 1024
+    hidden_size: 1024
+
+transformer_kwargs:
+  T: 5
+  hidden_size: 1024
+  nlayer: 4
+  nhead: 4
+  dim_feedforward: 1024
+  dropout: 0.1
+
+## connector model configs
+connector_exp_path: "checkpoints/TE_ref_sharing_e2v+L_wMSE+0.1Cnt+0.05Dir_diffID_bidir_4H4L_1024_mean10_average_None_siFalse_wFalse/_epoch_1526_checkpoint_step000145000.pth"
+weight_dtype: 'fp32'
+
+## test cases
+test_cases:
+  "gpt":
+    data_root: "./dataset/MEAD/FPS25"
+    source_image: "./asset/stephen_curry_crop.png"
+    audio_driving_path: "./test_data/stephen_curry.wav"
+    pose_driving_path: "./test_data/stephen_curry.mp4"
+    target_emotions: ["angry", "contempt", "disgusted", "fear", "neutral", "happy", "sad", "surprised"]
+    intensity: 3.0

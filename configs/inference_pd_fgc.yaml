@@ -1,0 +1,114 @@
+## dependency models
+emotion2vec_model_id: "iic/emotion2vec_base"
+audio2lip_model_path: "./pretrained_weights/Audio2Lip.pt"
+pretrained_EDTalk:
+  model_path: "./pretrained_weights/EDTalk.pt"
+  size: 256
+  latent_dim_style: 512
+  latent_dim_lip: 20
+  latent_dim_pose: 6
+  latent_dim_exp: 10
+  channel_multiplier: 1
+
+## Connector model config
+projector_kwargs:
+  path:
+  exp:
+    mm_projector_type: "mlp2x_gelu"
+    mm_hidden_size: 1024
+    hidden_size: 30
+  speaker:
+    mm_projector_type: "mlp2x_gelu"
+    mm_hidden_size: 1024
+    hidden_size: 1024
+
+transformer_kwargs:
+  T: 5
+  hidden_size: 1024
+  nlayer: 4
+  nhead: 4
+  dim_feedforward: 1024
+  dropout: 0.1
+
+## connector model configs
+connector_exp_path: "/home3/t20181257/EmotionalTFG/checkpoints/TE_ref_bidir_wMSE+0.05wEC_1024_4H4L_1024_mean_average_None/_epoch_1347_checkpoint_step000128000.pth"
+weight_dtype: 'fp32'
+
+## test cases
+test_cases:
+  "gpt":
+    data_root: "./dataset/MEAD/FPS25"
+    source_image: "./asset/stephen_curry_crop.png"
+    audio_driving_path: "./test_data/stephen_curry.wav"
+    pose_driving_path: "./test_data/stephen_curry.mp4"
+    target_emotions: ["angry", "contempt", "disgusted", "fear", "neutral", "happy", "sad", "surprised"]
+    intensity: 3.0
+
+  # experiment name
+exp_name: "inference"
+task: "inference"
+random_seed: 20202001
+
+# train type
+trainer_type: "none"
+dataset_type: "inference"
+
+# train configuration for some specific
+clip_len: 1
+input_id_feature: True
+num_clips: 1
+num_inputs: 1
+
+img_size: 224
+
+# network configuration and defination
+model:
+  output_nc: 3
+  # appearance network
+  net_appearance:
+    model_name: "resnext"
+    model_type: "encoder"
+    load_pretrain: False
+    resume: True
+    pretrained_model: "pretrained_weights/appearance_model.pth"
+    init: "gaussian"
+    init_gain: 0.02
+  
+  # non-motion network
+  net_motion:
+    model_name: "fan"
+    model_type: "encoder"
+    resume: True
+    pretrained_model: "pretrained_weights/motion_model.pth"
+    init: "gaussian"
+    init_gain: 0.02
+    pose_dim: 6
+    eye_dim: 6
+    emo_dim: 30
+    motion_dim: 0
+
+  # audio network
+  net_audio:
+    model_name: "ressesync"
+    model_type: "encoder"
+    resume: True
+    pretrained_model: "pretrained_weights/audio_model.pth"
+    init: "gaussian"
+    init_gain: 0.02
+    n_mel_T: 4
+  
+  # generator network
+  net_generator:
+    model_name: "modulate"
+    model_type: "generator"
+    resume: True
+    pretrained_model: "pretrained_weights/generator_model.pth"
+    init: "gaussian"
+    init_gain: 0.02
+    style_dim: 2590
+    feature_encoded_dim: 2590
+    style_feature_loss: True
+    
+
+
+
