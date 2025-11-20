@@ -87,12 +87,6 @@ Download the [checkpoints](https://drive.google.com/file/d/1cTB3GqCDIigtedh-SNzU
   ```
   ****
 
-  | | | | |
-  |---|---|---|---|
-  | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/65cf3d1a-5256-4399-9c84-49873c8ad9e6"></video> | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/d91688d2-b5aa-4104-8f3e-69f1a9691ef6"></video> | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/0ec3d1ea-e4ec-410f-a3eb-9d88bd320a74"></video> | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/044fd0a5-8cd7-4f48-bd96-9d5c7e2371e5"></video> |
-  | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/04b0f945-0245-40b9-aa45-46d39684d54a"></video> | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/3bc41be9-f8f0-4e69-aabe-19cadc096e2e"></video> | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/c97af3b2-da30-462e-a92b-c4ec9436972a"></video> | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/46d2efc8-384b-40a2-9dba-fb2ddeb1935c"></video> |
-
-
 
   The result will be stored in save_path.
 
@@ -131,6 +125,17 @@ Here are some examples:
     --emo_e2v_path ./audios/MEAD/happy/emotion2vec+large_features/ \
     --sr
   ```
+
+  | | | | |
+  |---|---|---|---|
+  | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/65cf3d1a-5256-4399-9c84-49873c8ad9e6"></video> | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/d91688d2-b5aa-4104-8f3e-69f1a9691ef6"></video> | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/0ec3d1ea-e4ec-410f-a3eb-9d88bd320a74"></video> | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/044fd0a5-8cd7-4f48-bd96-9d5c7e2371e5"></video> |
+  | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/04b0f945-0245-40b9-aa45-46d39684d54a"></video> | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/3bc41be9-f8f0-4e69-aabe-19cadc096e2e"></video> | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/c97af3b2-da30-462e-a92b-c4ec9436972a"></video> | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/46d2efc8-384b-40a2-9dba-fb2ddeb1935c"></video> |
+
+
+  | | | | |
+  |---|---|---|---|
+  | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/48706b60-d9e4-479d-a38e-f5c42583b3e6"></video> | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/b6fb3771-eaf8-4b39-a2a3-1c9130228fb5"></video> | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/7f26e1ec-f796-4a54-8e0c-d6d7653beef5"></video> | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/aa0ffbf6-f3f2-4325-999f-204f2a0a77b6"></video> |
+  | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/b819d939-641c-4051-b820-3c6fcb788169"></video> | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/3081f756-2f60-44e3-8233-cba23bf59dbb"></video> | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/c693adc3-92ca-4789-8ea4-4f6055c83502"></video> | |
 
 
 ##  🎬 Data Preprocess for Training
