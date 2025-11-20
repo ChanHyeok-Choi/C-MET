@@ -71,7 +71,7 @@ Download the [checkpoints](https://drive.google.com/file/d/1cTB3GqCDIigtedh-SNzU
 
 
 ### **C-MET**: Run the demo:
-#### For user-friendliness, we extracted emotion2vec+large features of eight common sentiments and six extended emotions. one can directly specify the sentiment to generate emotional talking face videos (recommended)
+#### For user-friendliness, we extracted emotion2vec+large features of eight common sentiments (angry, contempt, disgusted, fear, happy, neutral, sad, surprised) and six extended emotions (charismatic, desirous, empathetic, envious, romantic, sarcastic). Please check subfolders in the `audios` and one can directly specify the sentiment to generate emotional talking face videos (recommended)
   ```
   python inference.py --num_samples recommend_more_than_three --connector_exp_path path/to/model --source_path path/to/image --audio_driving_path path/to/audio --pose_driving_path path/to/pose --save_path path/to/save --neu_e2v_path path/to/neutral_emotion2vec+large_features --emo_e2v_path path/to/emotional_emotion2vec+large_features
 
