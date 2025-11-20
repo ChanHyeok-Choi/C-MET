@@ -78,7 +78,7 @@ Download the [checkpoints](https://drive.google.com/file/d/1cTB3GqCDIigtedh-SNzU
   # example:
   python inference.py --num_samples 10 \
     --connector_exp_path ./checkpoints/_epoch_2105_checkpoint_step000200000.pth\
-    --source_path ./asset/identity/sydney_crop.png \
+    --source_path ./asset/identity/ChatGPT_man3_crop.png \
     --audio_driving_path ./asset/audio/W009_038.wav \
     --pose_driving_path ./asset/video/W009_038.mp4 \
     --save_path ./res/sydney_angry.mp4 \
@@ -89,8 +89,8 @@ Download the [checkpoints](https://drive.google.com/file/d/1cTB3GqCDIigtedh-SNzU
 
   | | | | |
   |---|---|---|---|
-  | <video controls loop muted src="https://github.com/user-attachments/assets/3bc41be9-f8f0-4e69-aabe-19cadc096e2e"></video> | <video controls loop muted src="https://github.com/user-attachments/assets/0ec3d1ea-e4ec-410f-a3eb-9d88bd320a74"></video> | <video controls loop muted src="https://github.com/user-attachments/assets/044fd0a5-8cd7-4f48-bd96-9d5c7e2371e5"></video> | <video controls loop muted src="https://github.com/user-attachments/assets/04b0f945-0245-40b9-aa45-46d39684d54a"></video> |
-  | <video controls loop muted src="https://github.com/user-attachments/assets/65cf3d1a-5256-4399-9c84-49873c8ad9e6"></video> | <video controls loop muted src="https://github.com/user-attachments/assets/c97af3b2-da30-462e-a92b-c4ec9436972a"></video> | <video controls loop muted src="https://github.com/user-attachments/assets/46d2efc8-384b-40a2-9dba-fb2ddeb1935c"></video> | <video controls loop muted src="https://github.com/user-attachments/assets/d91688d2-b5aa-4104-8f3e-69f1a9691ef6"></video> |
+  | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/65cf3d1a-5256-4399-9c84-49873c8ad9e6"></video> | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/d91688d2-b5aa-4104-8f3e-69f1a9691ef6"></video> | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/0ec3d1ea-e4ec-410f-a3eb-9d88bd320a74"></video> | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/044fd0a5-8cd7-4f48-bd96-9d5c7e2371e5"></video> |
+  | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/04b0f945-0245-40b9-aa45-46d39684d54a"></video> | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/3bc41be9-f8f0-4e69-aabe-19cadc096e2e"></video> | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/c97af3b2-da30-462e-a92b-c4ec9436972a"></video> | <video controls loop muted width="220" src="https://github.com/user-attachments/assets/46d2efc8-384b-40a2-9dba-fb2ddeb1935c"></video> |
 
 
 
