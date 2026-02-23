@@ -8,13 +8,18 @@
   <a href="">Taesoo Kim</a><sup>1</sup>, 
   <a href="">Donggyu Lee</a><sup>1</sup>, 
   <a href="https://scholar.google.com/citations?user=8i64L-wAAAAJ&hl=en">Siyeol Jung</a><sup>1</sup>, 
-  <a href="https://scholar.google.com/citations?user=5dGWexcAAAAJ&hl=en&oi=sra">Taehwan Kim</a><sup>1</sup>, 
+  <a href="https://scholar.google.com/citations?user=5dGWexcAAAAJ&hl=en&oi=sra">Taehwan Kim</a><sup>1</sup>
   <br><br>
   <sup>1</sup>Ulsan National Institute of Science and Technology<br>
   <br>
-<!-- <i><strong><a href='https://cvpr.thecvf.com/' target='_blank'>CVPR 2026</a></strong></i> -->
+<i><strong><a href='https://cvpr.thecvf.com/' target='_blank'>CVPR 2026</a></strong></i>
 </p>
 
+<div align="center">
+  <a href="https://chanhyeok-choi.github.io/C-MET/"><img src="https://img.shields.io/badge/project-C--MET-red"></a> &ensp;
+  <a href=""><img src="https://img.shields.io/badge/Arxiv-C--MET-blue"></a> &ensp;
+  <a href="https://github.com/chanhyeok-choi/C-MET"><img src="https://img.shields.io/github/stars/chanhyeok-choi/C-MET?style=social"></a> &ensp;
+</div>
 
 </div>
 
@@ -27,7 +32,7 @@
 
 ## 🎏 Abstract
 Talking face generation has gained significant attention as a core application of generative models. To enhance the expressiveness and realism of synthesized videos, emotion editing in talking face video plays a crucial role. However, existing approaches often limit expressive flexibility and struggle to generate extended emotions. Label-based methods represent emotions with discrete categories, which fail to capture a wide range of emotions.
-Audio-based methods can leverage emotionally rich speech signals—and even benefit from expressive text-to-speech (TTS) synthesis—but they fail to express the target emotions because emotions and linguistic contents are entangled in emotional speeches. Images-based methods, on the other hand, rely on target reference images to guide emotion transfer, yet they require high-quality frontal views and face challenges in acquiring reference data for extended emotions (e.g., sarcasm). To address these challenges, we propose <strong>Cross-Modal Emotion Transfer (C-MET)</strong>, a novel approach that generates facial expressions based on speeches by modeling emotion semantic vectors between speech and visual feature spaces. C-MET leverages a large-scale pretrained audio encoder and a disentangled facial expression encoder to learn emotion semantic vectors that represent the difference between two different emotional embeddings across modalities.Extensive experiments on the MEAD and CREMA-D datasets demonstrate that our method improves emotion accuracy by 14\% over state-of-the-art methods, while generating expressive talking face videos—even for unseen extended emotions. All source code and checkpoint will be released upon acceptance, including video samples.
+Audio-based methods can leverage emotionally rich speech signals—and even benefit from expressive text-to-speech (TTS) synthesis—but they fail to express the target emotions because emotions and linguistic contents are entangled in emotional speeches. Images-based methods, on the other hand, rely on target reference images to guide emotion transfer, yet they require high-quality frontal views and face challenges in acquiring reference data for extended emotions (e.g., sarcasm). To address these challenges, we propose <strong>Cross-Modal Emotion Transfer (C-MET)</strong>, a novel approach that generates facial expressions based on speeches by modeling emotion semantic vectors between speech and visual feature spaces. C-MET leverages a large-scale pretrained audio encoder and a disentangled facial expression encoder to learn emotion semantic vectors that represent the difference between two different emotional embeddings across modalities.Extensive experiments on the MEAD and CREMA-D datasets demonstrate that our method improves emotion accuracy by 14\% over state-of-the-art methods, while generating expressive talking face videos—even for unseen extended emotions.
 ## 💻 Overview
 <div align="center">
   <img src="asset/main_method.png" width="800" ></img>
@@ -199,7 +204,7 @@ Here are some examples:
     |   |-- ...
     ```
 
-  We provide our dataset sources, downloading [here]() (150GB).
+
 
 </details>
 
@@ -221,9 +226,24 @@ Here are some examples:
 </details>
 
 
+
+## 🎓 Citation
+
+```
+@inproceedings{choi2026cross,
+  title={Cross-Modal Emotion Transfer for Emotion Editing in Talking Face Video},
+  author={},
+  booktitle={Proceedings of the Computer Vision and Pattern Recognition Conference},
+  pages={},
+  year={2026}
+}
+```
+
 ## 🙏 Acknowledgement
 Some code are borrowed from following projects:
 * [emotion2vec](https://github.com/ddlBoJack/emotion2vec)
 * [PD-FGC](https://github.com/Dorniwang/PD-FGC-inference)
 * [FOMM video preprocessing](https://github.com/AliaksandrSiarohin/video-preprocessing)
+* [IP-LAP](https://github.com/Weizhi-Zhong/IP_LAP)
 * [EDTalk](https://github.com/tanshuai0219/EDTalk)
+* [EmoKnob](https://github.com/tonychenxyz/emoknob)
