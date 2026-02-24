@@ -16,7 +16,7 @@
 </p>
 
 <div align="center">
-  <a href="https://chanhyeok-choi.github.io/C-MET/"><img src="https://img.shields.io/badge/project-C--MET-red"></a> &ensp;
+  <a href=""><img src="https://img.shields.io/badge/project-C--MET-red"></a> &ensp;
   <a href=""><img src="https://img.shields.io/badge/Arxiv-C--MET-blue"></a> &ensp;
   <a href="https://github.com/chanhyeok-choi/C-MET"><img src="https://img.shields.io/github/stars/chanhyeok-choi/C-MET?style=social"></a> &ensp;
 </div>
@@ -152,7 +152,7 @@ Here are some examples:
 
   1) **MEAD**. [download link](https://wywu.github.io/projects/MEAD/MEAD.html). 
 
-      We only use *Front* videos and extract audios and orgnize the data as follows:
+      We only use *Front* videos saying *Common* and *Generic* sentences over all emotions. We extract audios and orgnize the data as follows:
 
     ```text
     ./dataset/MEAD/FPS25/
