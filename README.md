@@ -7,7 +7,7 @@
   <a href="https://scholar.google.com/citations?user=0M03qmEAAAAJ&hl=en">Chanhyuk Choi</a><sup>1</sup>,
   <a href="">Taesoo Kim</a><sup>1</sup>, 
   <a href="">Donggyu Lee</a><sup>1</sup>, 
-  <a href="https://scholar.google.com/citations?user=8i64L-wAAAAJ&hl=en">Siyeol Jung</a><sup>1</sup>, 
+  <a href="">Siyeol Jung</a><sup>1</sup>, 
   <a href="https://scholar.google.com/citations?user=5dGWexcAAAAJ&hl=en&oi=sra">Taehwan Kim</a><sup>1</sup>
   <br><br>
   <sup>1</sup>Ulsan National Institute of Science and Technology<br>
@@ -16,8 +16,8 @@
 </p>
 
 <div align="center">
-  <a href=""><img src="https://img.shields.io/badge/project-C--MET-red"></a> &ensp;
-  <a href=""><img src="https://img.shields.io/badge/Arxiv-C--MET-blue"></a> &ensp;
+  <a href=""><img src="https://img.shields.io/badge/Project-C--MET-red"></a> &ensp;
+  <a href=""><img src="https://img.shields.io/badge/PDF-C--MET-blue"></a> &ensp;
   <a href="https://github.com/chanhyeok-choi/C-MET"><img src="https://img.shields.io/github/stars/chanhyeok-choi/C-MET?style=social"></a> &ensp;
 </div>
 
@@ -35,13 +35,18 @@ Talking face generation has gained significant attention as a core application o
 Audio-based methods can leverage emotionally rich speech signals—and even benefit from expressive text-to-speech (TTS) synthesis—but they fail to express the target emotions because emotions and linguistic contents are entangled in emotional speeches. Images-based methods, on the other hand, rely on target reference images to guide emotion transfer, yet they require high-quality frontal views and face challenges in acquiring reference data for extended emotions (e.g., sarcasm). To address these challenges, we propose <strong>Cross-Modal Emotion Transfer (C-MET)</strong>, a novel approach that generates facial expressions based on speeches by modeling emotion semantic vectors between speech and visual feature spaces. C-MET leverages a large-scale pretrained audio encoder and a disentangled facial expression encoder to learn emotion semantic vectors that represent the difference between two different emotional embeddings across modalities.Extensive experiments on the MEAD and CREMA-D datasets demonstrate that our method improves emotion accuracy by 14\% over state-of-the-art methods, while generating expressive talking face videos—even for unseen extended emotions.
 ## 💻 Overview
 <div align="center">
-  <img src="asset/main_method.png" width="800" ></img>
+  <img src="asset/cmet.png" width="800" ></img>
   <br>
 </div>
 <br>
 
 
 ## 🔥 Update
+
+- [2026/03/07] Data processing and train code are available.
+- [2026/03/06] Pretrained weights and inference code are available.
+- [2026/02/20] C-MET has been accepted for CVPR 2026!
+<!-- - [2026/03/06] [Arxiv](https://arxiv.com/) is avaiable. -->
 
 ## 📅 TODO
 
@@ -232,7 +237,7 @@ Here are some examples:
 ```
 @inproceedings{choi2026cross,
   title={Cross-Modal Emotion Transfer for Emotion Editing in Talking Face Video},
-  author={},
+  author={Choi, Chanhyuk and Kim, Taesoo and Lee, Donggyu and Jung, Siyeol and Kim, Taehwan},
   booktitle={Proceedings of the Computer Vision and Pattern Recognition Conference},
   pages={},
   year={2026}
