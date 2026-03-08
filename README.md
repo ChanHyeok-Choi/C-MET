@@ -4,13 +4,13 @@
 
 
 <p align="center">
-  <a href="https://scholar.google.com/citations?user=0M03qmEAAAAJ&hl=en">Chanhyuk Choi</a><sup>1</sup>,
-  <a href="">Taesoo Kim</a><sup>1</sup>, 
-  <a href="">Donggyu Lee</a><sup>1</sup>, 
-  <a href="">Siyeol Jung</a><sup>1</sup>, 
-  <a href="https://scholar.google.com/citations?user=5dGWexcAAAAJ&hl=en&oi=sra">Taehwan Kim</a><sup>1</sup>
+  <a href="https://scholar.google.com/citations?user=0M03qmEAAAAJ&hl=en">Chanhyuk Choi</a>,
+  <a href="">Taesoo Kim</a>, 
+  <a href="">Donggyu Lee</a>, 
+  <a href="">Siyeol Jung</a>, 
+  <a href="https://scholar.google.com/citations?user=5dGWexcAAAAJ&hl=en&oi=sra">Taehwan Kim</a>
   <br><br>
-  <sup>1</sup>Ulsan National Institute of Science and Technology<br>
+  Ulsan National Institute of Science and Technology<br>
   <br>
 <i><strong><a href='https://cvpr.thecvf.com/' target='_blank'>CVPR 2026</a></strong></i>
 </p>
