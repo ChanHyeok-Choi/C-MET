@@ -16,7 +16,7 @@
 </p>
 
 <div align="center">
-  <a href=""><img src="https://img.shields.io/badge/Project-C--MET-red"></a> &ensp;
+  <a href="https://chanhyeok-choi.github.io/C-MET/"><img src="https://img.shields.io/badge/Project-C--MET-red"></a> &ensp;
   <a href=""><img src="https://img.shields.io/badge/PDF-C--MET-blue"></a> &ensp;
   <a href="https://github.com/chanhyeok-choi/C-MET"><img src="https://img.shields.io/github/stars/chanhyeok-choi/C-MET?style=social"></a> &ensp;
 </div>
