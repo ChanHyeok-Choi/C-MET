@@ -17,7 +17,7 @@
 
 <div align="center">
   <a href="https://chanhyeok-choi.github.io/C-MET/"><img src="https://img.shields.io/badge/Project-C--MET-red"></a> &ensp;
-  <a href=""><img src="https://img.shields.io/badge/PDF-C--MET-blue"></a> &ensp;
+  <a href="https://arxiv.org/abs/2604.07786"><img src="https://img.shields.io/badge/arXiv-2604.07786-b31b1b"></a> &ensp;
   <a href="https://github.com/chanhyeok-choi/C-MET"><img src="https://img.shields.io/github/stars/chanhyeok-choi/C-MET?style=social"></a> &ensp;
 </div>
 
@@ -46,11 +46,11 @@ Audio-based methods can leverage emotionally rich speech signals—and even bene
 - [2026/03/07] Data processing and train code are available.
 - [2026/03/06] Pretrained weights and inference code are available.
 - [2026/02/20] C-MET has been accepted for CVPR 2026!
-<!-- - [2026/03/06] [Arxiv](https://arxiv.com/) is avaiable. -->
+- [2026/04/09] [arXiv](https://arxiv.org/abs/2604.07786) is available.
 
 ## 📅 TODO
 
-- [ ] **Release Arxiv paper.**
+- [x] **Release Arxiv paper.**
 - [x] **Release training code.**
 - [x] **Release inference code.**
 - [x] **Release pre-trained models.**
