@@ -19,6 +19,8 @@
   <a href="https://chanhyeok-choi.github.io/C-MET/"><img src="https://img.shields.io/badge/Project-C--MET-red"></a> &ensp;
   <a href="https://arxiv.org/abs/2604.07786"><img src="https://img.shields.io/badge/arXiv-2604.07786-b31b1b"></a> &ensp;
   <a href="https://github.com/chanhyeok-choi/C-MET"><img src="https://img.shields.io/github/stars/chanhyeok-choi/C-MET?style=social"></a> &ensp;
+  <a href="https://huggingface.co/coldhyuk/C-MET"><img src="https://img.shields.io/badge/🤗%20HF-Model-yellow"></a> &ensp;
+  <a href="https://huggingface.co/spaces/coldhyuk/C-MET"><img src="https://img.shields.io/badge/🤗%20HF-Demo-blue"></a> &ensp;
 </div>
 
 </div>
@@ -43,13 +45,15 @@ Audio-based methods can leverage emotionally rich speech signals—and even bene
 
 ## 🔥 Update
 
+- [2026/04/14] Hugging Face [Model](https://huggingface.co/coldhyuk/C-MET) and [Space](https://huggingface.co/spaces/coldhyuk/C-MET) are available.
+- [2026/04/09] [arXiv](https://arxiv.org/abs/2604.07786) is available.
 - [2026/03/07] Data processing and train code are available.
 - [2026/03/06] Pretrained weights and inference code are available.
 - [2026/02/20] C-MET has been accepted for CVPR 2026!
-- [2026/04/09] [arXiv](https://arxiv.org/abs/2604.07786) is available.
 
 ## 📅 TODO
 
+- [x] **Release Hugging Face Model and Space.**
 - [x] **Release Arxiv paper.**
 - [x] **Release training code.**
 - [x] **Release inference code.**
@@ -77,7 +81,7 @@ pip install -r requirements.txt
 
 ## 🎬 Quick Start
 
-Download the [checkpoints](https://drive.google.com/file/d/1cTB3GqCDIigtedh-SNzUzYIyW0pBk_mQ/view?usp=sharing) and put it into ./checkpoints. In addition, download [EDTalk Audio2Lip.pt and EDTalk.pt](https://drive.google.com/file/d/1EKJXpq5gwFaRfkiAs6YUZ6YEiQ-8X3H3/view) and put them into ./pretrained_weights
+Download the [checkpoints](https://drive.google.com/file/d/1cTB3GqCDIigtedh-SNzUzYIyW0pBk_mQ/view?usp=sharing) and put it into ./checkpoints. In addition, download [EDTalk Audio2Lip.pt and EDTalk.pt](https://drive.google.com/file/d/1EKJXpq5gwFaRfkiAs6YUZ6YEiQ-8X3H3/view) from [EDTalk](https://github.com/tanshuai0219/EDTalk) and put them into ./pretrained_weights
 
 
 ### **C-MET**: Run the demo:
@@ -239,7 +243,6 @@ Here are some examples:
   title={Cross-Modal Emotion Transfer for Emotion Editing in Talking Face Video},
   author={Choi, Chanhyuk and Kim, Taesoo and Lee, Donggyu and Jung, Siyeol and Kim, Taehwan},
   booktitle={IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
-  pages={},
   year={2026}
 }
 ```
