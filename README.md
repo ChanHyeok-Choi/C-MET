@@ -91,9 +91,9 @@ Download the [checkpoints](https://drive.google.com/file/d/1cTB3GqCDIigtedh-SNzU
     --source_path ./asset/identity/ChatGPT_man3_crop.png \
     --audio_driving_path ./asset/audio/W009_038.wav \
     --pose_driving_path ./asset/video/W009_038.mp4 \
-    --save_path ./res/sydney_angry.mp4 \
+    --save_path ./res/ChatGPT_man3_happy.mp4 \
     --neu_e2v_path ./audios/MEAD/neutral/emotion2vec+large_features/ \
-    --emo_e2v_path ./audios/MEAD/angry/emotion2vec+large_features/
+    --emo_e2v_path ./audios/MEAD/happy/emotion2vec+large_features/
   ```
   ****
 
@@ -130,9 +130,9 @@ Here are some examples:
     --source_path ./asset/identity/ang_crop.png \
     --audio_driving_path ./asset/audio/W009_038.wav \
     --pose_driving_path ./asset/video/W009_038.mp4 \
-    --save_path ./res/sydney_angry.mp4 \
+    --save_path ./res/ang_angry.mp4 \
     --neu_e2v_path ./audios/MEAD/neutral/emotion2vec+large_features/ \
-    --emo_e2v_path ./audios/MEAD/happy/emotion2vec+large_features/ \
+    --emo_e2v_path ./audios/MEAD/angry/emotion2vec+large_features/ \
     --sr
   ```
 
