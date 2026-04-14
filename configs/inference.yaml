@@ -31,7 +31,7 @@ transformer_kwargs:
   dropout: 0.1
 
 ## connector model configs
-connector_exp_path: "checkpoints/TE_ref_sharing_e2v+L_wMSE+0.1Cnt+0.05Dir_diffID_bidir_4H4L_1024_mean10_average_None_siFalse_wFalse/_epoch_1526_checkpoint_step000145000.pth"
+connector_exp_path: "./checkpoints/_epoch_2105_checkpoint_step000200000.pth"
 weight_dtype: 'fp32'
 
 ## test cases

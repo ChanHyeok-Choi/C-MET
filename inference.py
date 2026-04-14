@@ -2,6 +2,7 @@ import argparse
 import os, sys
 sys.path.append('src')
 sys.path.append('src/metavoice')
+from huggingface_hub import hf_hub_download
 
 from datetime import datetime
 from pathlib import Path
@@ -25,6 +26,24 @@ import pickle
 from funasr import AutoModel
 import pandas as pd
 import random
+
+HF_REPO_ID = "coldhyuk/C-MET"
+PRETRAINED_WEIGHT_FILES = ["Audio2Lip.pt", "EDTalk.pt", "EDTalk-V.pt"]
+
+
+def ensure_pretrained_weights(pretrained_dir="./pretrained_weights"):
+    """Download pretrained weights from HF Hub if not present locally."""
+    os.makedirs(pretrained_dir, exist_ok=True)
+    for filename in PRETRAINED_WEIGHT_FILES:
+        local_path = os.path.join(pretrained_dir, filename)
+        if not os.path.exists(local_path):
+            print(f"Downloading {filename} from Hugging Face...")
+            hf_hub_download(
+                repo_id=HF_REPO_ID,
+                filename=f"pretrained_weights/{filename}",
+                local_dir=".",
+            )
+
 
 predefined_emo = ["angry", "contempt", "disgusted", "fear", "happy", "sad", "surprised"]
 emo_map = {"charisma": "contempt", "empathy": "sad", "desire": "neutral", "envy": "neutral", "sarcasm": "neutral", "romance": "neutral"}
@@ -79,6 +98,7 @@ def fix_seed(seed):
 def main():
     args = parse_args()
     fix_seed(args.seed)
+    ensure_pretrained_weights()
 
     config = OmegaConf.load(args.config)
     if config.weight_dtype == "fp16":

@@ -3,3 +3,5 @@ pretrained_weights/*.pt
 tensorboard_runs
 res
 supp
+MODEL_CARD.md
+upload_to_hf.py

@@ -3,6 +3,7 @@ import torch.nn as nn
 import re
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 import math
+from huggingface_hub import PyTorchModelHubMixin
 
 
 
@@ -132,7 +133,7 @@ class Speaker_encoder(nn.Module):
         return out.unsqueeze(1)  # (bs, 1, 1024)
     
 
-class Connector_exp(nn.Module):
+class Connector_exp(nn.Module, PyTorchModelHubMixin):
     def __init__(self, config_projector, config_transformer, device='cuda'):
         super().__init__()
         self.device = device
