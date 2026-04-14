@@ -29,6 +29,7 @@ import random
 
 HF_REPO_ID = "coldhyuk/C-MET"
 PRETRAINED_WEIGHT_FILES = ["Audio2Lip.pt", "EDTalk.pt", "EDTalk-V.pt"]
+HF_CHECKPOINT_FILENAME = "checkpoints/_epoch_2105_checkpoint_step000200000.pth"
 
 
 def ensure_pretrained_weights(pretrained_dir="./pretrained_weights"):
@@ -43,6 +44,18 @@ def ensure_pretrained_weights(pretrained_dir="./pretrained_weights"):
                 filename=f"pretrained_weights/{filename}",
                 local_dir=".",
             )
+
+
+def ensure_checkpoint(connector_exp_path):
+    """Download connector checkpoint from HF Hub if not present locally."""
+    if not os.path.exists(connector_exp_path):
+        print(f"Downloading checkpoint from Hugging Face...")
+        os.makedirs(os.path.dirname(connector_exp_path), exist_ok=True)
+        hf_hub_download(
+            repo_id=HF_REPO_ID,
+            filename=HF_CHECKPOINT_FILENAME,
+            local_dir=".",
+        )
 
 
 predefined_emo = ["angry", "contempt", "disgusted", "fear", "happy", "sad", "surprised"]
@@ -101,6 +114,8 @@ def main():
     ensure_pretrained_weights()
 
     config = OmegaConf.load(args.config)
+    connector_exp_path = args.connector_exp_path if args.connector_exp_path else config.connector_exp_path
+    ensure_checkpoint(connector_exp_path)
     if config.weight_dtype == "fp16":
         weight_dtype = torch.float16
     else:
