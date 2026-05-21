@@ -12,7 +12,7 @@
   <br><br>
   Ulsan National Institute of Science and Technology<br>
   <br>
-<i><strong><a href='https://cvpr.thecvf.com/' target='_blank'>CVPR 2026</a></strong></i>
+<i><strong><a href='https://cvpr.thecvf.com/virtual/2026/poster/36792' target='_blank'>CVPR 2026</a></strong></i>
 </p>
 
 <div align="center">
