@@ -242,7 +242,8 @@ Here are some examples:
 @inproceedings{choi2026cross,
   title={Cross-Modal Emotion Transfer for Emotion Editing in Talking Face Video},
   author={Choi, Chanhyuk and Kim, Taesoo and Lee, Donggyu and Jung, Siyeol and Kim, Taehwan},
-  booktitle={IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
+  booktitle={Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition},
+  pages={1759--1770},
   year={2026}
 }
 ```
