@@ -180,8 +180,42 @@ def load_models(config_path: str = "./configs/inference.yaml"):
 # Preprocessing helpers
 # ---------------------------------------------------------------------------
 
-def crop_video_to_25fps(input_path: str, out_path: str):
-    print("Detecting face for crop...")
+def _detect_bboxes(frame_rgb, fa, max_size: int = 640):
+    h, w = frame_rgb.shape[:2]
+    if max(h, w) > max_size:
+        scale = max(h, w) / max_size
+        small = cv2.resize(frame_rgb, (int(w / scale), int(h / scale)))
+    else:
+        scale = 1.0
+        small = frame_rgb
+    raw = fa.face_detector.detect_from_image(small[..., ::-1])
+    if len(raw) == 0:
+        return np.empty((0, 4))
+    return np.array(raw)[:, :4] * scale
+
+
+def _bbox_iou(a, b):
+    xA, yA = max(a[0], b[0]), max(a[1], b[1])
+    xB, yB = min(a[2], b[2]), min(a[3], b[3])
+    inter = max(0, xB - xA + 1) * max(0, yB - yA + 1)
+    areaA = (a[2] - a[0] + 1) * (a[3] - a[1] + 1)
+    areaB = (b[2] - b[0] + 1) * (b[3] - b[1] + 1)
+    return inter / float(areaA + areaB - inter)
+
+
+def _join_bbox(tube, bbox):
+    return (min(tube[0], bbox[0]), min(tube[1], bbox[1]),
+            max(tube[2], bbox[2]), max(tube[3], bbox[3]))
+
+
+def crop_video_to_25fps(input_path: str, out_path: str,
+                        increase_area: float = 0.1, iou_threshold: float = 0.25):
+    """Trajectory-based face crop (mirrors data_preprocess/crop_video.py).
+
+    Tracks face bboxes across ALL frames, accumulates a tube_bbox per
+    trajectory, then crops with aspect-preserving padding.
+    """
+    print("Detecting faces across all frames for crop (trajectory-based)...")
     fa = face_alignment.FaceAlignment(
         face_alignment.LandmarksType.TWO_D,
         flip_input=False,
@@ -189,40 +223,75 @@ def crop_video_to_25fps(input_path: str, out_path: str):
     )
 
     cap = cv2.VideoCapture(input_path)
-    ok, frame_bgr = cap.read()
+    if not cap.isOpened():
+        raise RuntimeError(f"Cannot open video: {input_path}")
+
+    frame_shape = None
+    # trajectory: [initial_bbox, tube_bbox, start_idx, end_idx]
+    active: list = []
+    completed: list = []
+
+    idx = 0
+    while True:
+        ok, frame_bgr = cap.read()
+        if not ok:
+            break
+        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        if frame_shape is None:
+            frame_shape = frame_rgb.shape
+
+        bboxes = _detect_bboxes(frame_rgb, fa)
+
+        # Expire trajectories where no current bbox overlaps the initial bbox
+        still_active, lost = [], []
+        for traj in active:
+            best = max((_bbox_iou(traj[0], b) for b in bboxes), default=0.0)
+            (still_active if best > iou_threshold else lost).append(traj)
+        completed.extend(lost)
+        active = still_active
+
+        # Assign each detected bbox to the best-matching active trajectory
+        for bbox in bboxes:
+            best_score, best_traj = 0.0, None
+            for traj in active:
+                score = _bbox_iou(traj[0], bbox)
+                if score > best_score and score > iou_threshold:
+                    best_score, best_traj = score, traj
+            if best_traj is None:
+                active.append([bbox.copy(), bbox.copy(), idx, idx])
+            else:
+                best_traj[3] = idx
+                best_traj[1] = _join_bbox(best_traj[1], bbox)
+
+        idx += 1
+
     cap.release()
-    if not ok:
-        raise RuntimeError(f"Cannot read video: {input_path}")
+    completed.extend(active)
 
-    frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-    h, w = frame_rgb.shape[:2]
-
-    scale = 1.0
-    if max(h, w) > 640:
-        scale = max(h, w) / 640.0
-        small = cv2.resize(frame_rgb, (int(w / scale), int(h / scale)))
-    else:
-        small = frame_rgb
-
-    bboxes = fa.face_detector.detect_from_image(small[..., ::-1])
-    if len(bboxes) == 0:
+    if not completed:
         raise RuntimeError(
-            "No face detected in the first frame. "
-            "Try trimming the video or using a different clip."
+            "No face detected in any frame. "
+            "Make sure your face is visible in the video."
         )
 
-    x1, y1, x2, y2 = [v * scale for v in bboxes[0][:4]]
-    bw, bh = x2 - x1, y2 - y1
-    pad = 0.1
-    x1 = max(0, int(x1 - pad * bw))
-    y1 = max(0, int(y1 - pad * bh))
-    x2 = min(w, int(x2 + pad * bw))
-    y2 = min(h, int(y2 + pad * bh))
-    cw, ch = x2 - x1, y2 - y1
+    # Longest trajectory → most stable face region
+    _, tube_bbox, _, _ = max(completed, key=lambda t: t[3] - t[2])
+    h, w = frame_shape[:2]
+    left, top, right, bot = tube_bbox
+    bw, bh = right - left, bot - top
+
+    # Aspect-preserving expansion (same formula as compute_bbox in crop_video.py)
+    w_inc = max(increase_area, ((1 + 2 * increase_area) * bh - bw) / (2 * bw))
+    h_inc = max(increase_area, ((1 + 2 * increase_area) * bw - bh) / (2 * bh))
+    left  = max(0, int(left  - w_inc * bw))
+    top   = max(0, int(top   - h_inc * bh))
+    right = min(w, int(right + w_inc * bw))
+    bot   = min(h, int(bot   + h_inc * bh))
+    cw, ch = right - left, bot - top
 
     cmd = (
         f'ffmpeg -i "{input_path}" '
-        f'-vf "crop={cw}:{ch}:{x1}:{y1},scale=256:256" '
+        f'-vf "crop={cw}:{ch}:{left}:{top},scale=256:256" '
         f'-r 25 "{out_path}" -y -loglevel error'
     )
     print("Cropping video to 25 fps / 256x256...")
