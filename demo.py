@@ -450,6 +450,65 @@ def create_comparison_video(input_video: str, result_video: str, emotion_name: s
     return comparison_path
 
 
+def create_multi_comparison_video(
+    input_video: str,
+    result_paths: list,
+    emotion_names: list,
+) -> str:
+    """Horizontal N+1 panel: Input | emotion1 | emotion2 | ..."""
+    save_path = "res/demo_multi_comparison.mp4"
+    tmp_path  = save_path + ".tmp.mp4"
+
+    caps   = [cv2.VideoCapture(input_video)] + [cv2.VideoCapture(p) for p in result_paths]
+    labels = ["Input Video"] + list(emotion_names)
+
+    frames = []
+    while True:
+        panel_frames = []
+        for cap in caps:
+            ret, frame = cap.read()
+            if not ret:
+                panel_frames = []
+                break
+            panel_frames.append(frame)
+        if not panel_frames:
+            break
+
+        h_ref, w_ref = panel_frames[1].shape[:2]
+        resized = [cv2.resize(f, (w_ref, h_ref)) for f in panel_frames]
+
+        font      = cv2.FONT_HERSHEY_DUPLEX
+        scale     = w_ref / 512 * 0.8
+        thickness = max(1, int(w_ref / 256))
+        y_pos     = max(30, int(h_ref * 0.07))
+
+        for frame, label in zip(resized, labels):
+            cv2.putText(frame, label, (10, y_pos), font, scale, (0, 0, 0), thickness + 2)
+            cv2.putText(frame, label, (10, y_pos), font, scale, (255, 255, 255), thickness)
+
+        combined_rgb = np.concatenate(
+            [cv2.cvtColor(f, cv2.COLOR_BGR2RGB) for f in resized],
+            axis=1,
+        )
+        frames.append(combined_rgb)
+
+    for cap in caps:
+        cap.release()
+
+    if not frames:
+        return result_paths[0]
+
+    os.makedirs("res", exist_ok=True)
+    imageio.mimsave(tmp_path, frames, fps=float(25))
+    audio_clip = AudioFileClip(result_paths[0])
+    video_clip = VideoFileClip(tmp_path)
+    video_clip.set_audio(audio_clip).write_videofile(
+        save_path, codec="libx264", audio_codec="aac", logger=None
+    )
+    os.remove(tmp_path)
+    return save_path
+
+
 def load_e2v_direction(neu_path: str, emo_path: str, num_samples: int = 10):
     neu_files = [
         os.path.join(neu_path, f) for f in os.listdir(neu_path) if f.endswith(".npy")
@@ -652,19 +711,27 @@ def run_inference_gradio(
                 pose_video=pose_src,
             )
             results[display_name] = (sr_path, comparison_path)
+
+        if len(results) > 1:
+            sr_paths = [results[n][0] for n in selected_display_names]
+            combined_cmp = create_multi_comparison_video(
+                cropped_video, sr_paths, selected_display_names
+            )
+        else:
+            combined_cmp = results[selected_display_names[0]][1]
     finally:
         shutil.rmtree(TMP_DIR, ignore_errors=True)
 
     progress(1.0, desc="완료!")
 
     first_display = selected_display_names[0]
-    first_sr, first_cmp = results[first_display]
+    first_sr, _ = results[first_display]
     choices = list(results.keys())
     multi = len(choices) > 1
 
     return (
         gr.update(value=first_sr, visible=True),
-        gr.update(value=first_cmp, visible=True),
+        gr.update(value=combined_cmp, visible=True),
         gr.update(choices=choices, value=first_display, visible=multi),
         results,
     )
