@@ -333,6 +333,16 @@ def extract_identity_frame(cropped_video_path: str, out_path: str):
     cv2.imwrite(out_path, frame)
 
 
+def _write_silent_wav(out_path: str, sr: int = 16000, duration: float = 60.0):
+    import wave
+    num_frames = int(sr * duration)
+    with wave.open(out_path, "w") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sr)
+        wf.writeframes(b"\x00" * num_frames * 2)
+
+
 def extract_audio(input_path: str, out_path: str):
     cmd = (
         f'ffmpeg -i "{input_path}" -f wav -acodec pcm_s16le -ar 16000 '
@@ -341,10 +351,9 @@ def extract_audio(input_path: str, out_path: str):
     print("Extracting audio...")
     ret = os.system(cmd)
     if ret != 0 or not os.path.exists(out_path):
-        raise RuntimeError(
-            "ffmpeg audio extraction failed. "
-            "Ensure the video has an audio stream and ffmpeg is installed."
-        )
+        print("[WARN] No audio stream found in video; using silent audio. "
+              "Stage 2에서 Audio Source를 직접 선택하세요.")
+        _write_silent_wav(out_path)
 
 
 def preprocess(input_video: str, tmp_dir: str):
@@ -725,15 +734,16 @@ def run_inference_gradio(
     progress(1.0, desc="완료!")
 
     first_display = selected_display_names[0]
-    first_sr, _ = results[first_display]
+    first_sr, first_cmp = results[first_display]
     choices = list(results.keys())
     multi = len(choices) > 1
 
     return (
         gr.update(value=first_sr, visible=True),
-        gr.update(value=combined_cmp, visible=True),
+        gr.update(value=first_cmp, visible=True),
         gr.update(choices=choices, value=first_display, visible=multi),
         results,
+        gr.update(value=combined_cmp, visible=multi),
     )
 
 
@@ -769,6 +779,7 @@ def build_gradio_app() -> gr.Blocks:
                     )
                 webcam_input = gr.Video(
                     sources=["webcam"],
+                    include_audio=True,
                     label="웹캠 촬영",
                     height=400,
                     visible=False,
@@ -895,6 +906,12 @@ def build_gradio_app() -> gr.Blocks:
                     visible=False,
                     height=400,
                 )
+                gr.Markdown("---\n#### 전체 감정 비교 (Input | emotion1 | emotion2 | ...)")
+                multi_comparison_video = gr.Video(
+                    label="전체 감정 비교 영상",
+                    visible=False,
+                    height=400,
+                )
                 back_to_emotion = gr.Button("← Select More Emotions")
 
         # ── Event wiring ─────────────────────────────────────────────
@@ -1000,8 +1017,9 @@ def build_gradio_app() -> gr.Blocks:
                 gr.update(visible=False),
                 gr.update(visible=False),
                 gr.update(visible=False),
+                gr.update(visible=False),
             ),
-            outputs=[tabs, status_md, result_video, comparison_video, result_selector],
+            outputs=[tabs, status_md, result_video, comparison_video, result_selector, multi_comparison_video],
         ).then(
             fn=run_inference_gradio,
             inputs=[
@@ -1010,7 +1028,7 @@ def build_gradio_app() -> gr.Blocks:
                 pose_asset_dd, pose_upload,
                 audio_asset_dd, audio_upload,
             ],
-            outputs=[result_video, comparison_video, result_selector, results_state],
+            outputs=[result_video, comparison_video, result_selector, results_state, multi_comparison_video],
         ).then(
             fn=lambda: "✅ 추론 완료! 아래에서 결과를 확인하세요.",
             outputs=[status_md],
