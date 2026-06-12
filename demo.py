@@ -345,6 +345,17 @@ def apply_super_resolution(video_path: str) -> str:
     if not check_package_installed("gfpgan"):
         return video_path
 
+    # basicsr.data.degradations imports from torchvision.transforms.functional_tensor
+    # which was removed in torchvision >= 0.16. Register a shim before gfpgan loads.
+    if "torchvision.transforms.functional_tensor" not in sys.modules:
+        import types
+        import torchvision.transforms.functional as _tvf
+        _shim = types.ModuleType("torchvision.transforms.functional_tensor")
+        for _attr in dir(_tvf):
+            if not _attr.startswith("__"):
+                setattr(_shim, _attr, getattr(_tvf, _attr))
+        sys.modules["torchvision.transforms.functional_tensor"] = _shim
+
     from src.EDTalk.face_sr.face_enhancer import enhancer_list
 
     out_path = video_path.replace(".mp4", "_512.mp4")
