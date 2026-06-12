@@ -67,6 +67,22 @@ SAMPLE_VIDEOS = {
     if name.endswith(".mp4")
 } if os.path.isdir(SAMPLE_VIDEO_DIR) else {}
 
+SAMPLE_IDENTITY_DIR = "asset/identity"
+SAMPLE_IDENTITY = {
+    name: os.path.join(SAMPLE_IDENTITY_DIR, name)
+    for name in sorted(os.listdir(SAMPLE_IDENTITY_DIR))
+    if name.lower().endswith((".png", ".jpg", ".jpeg"))
+} if os.path.isdir(SAMPLE_IDENTITY_DIR) else {}
+
+SAMPLE_AUDIO_DIR = "asset/audio"
+SAMPLE_AUDIO = {
+    name: os.path.join(SAMPLE_AUDIO_DIR, name)
+    for name in sorted(os.listdir(SAMPLE_AUDIO_DIR))
+    if name.lower().endswith(".wav")
+} if os.path.isdir(SAMPLE_AUDIO_DIR) else {}
+
+_SRC_DEFAULT = "기본값 (입력 비디오에서)"
+
 # Build unique display names and a lookup map
 EMOTION_DISPLAY_NAMES = []
 EMOTION_DISPLAY_MAP = {}  # display_name -> (name, group, e2v_path)
@@ -472,6 +488,7 @@ def run_single_inference(
     save_path: str,
     emotion_name: str = "",
     use_sr: bool = True,
+    pose_video: str = None,
     num_samples: int = 10,
 ):
     device        = _MODELS["device"]
@@ -490,7 +507,8 @@ def run_single_inference(
     lip_vid_target = conv_feat(lip_vid_target, k_size=3, sigma=1).to(device)
     lip_len = lip_vid_target.size(0)
 
-    pose_vid_target, fps = vid_preprocessing(cropped_video)
+    _pose_src = pose_video or cropped_video
+    pose_vid_target, fps = vid_preprocessing(_pose_src)
     pose_vid_target = pose_vid_target.to(device)
     len_pose = pose_vid_target.shape[1]
 
@@ -576,6 +594,12 @@ def run_inference_gradio(
     video_path,
     selected_display_names,
     use_sr: bool = True,
+    identity_asset_dd: str = _SRC_DEFAULT,
+    identity_upload=None,
+    pose_asset_dd: str = _SRC_DEFAULT,
+    pose_upload=None,
+    audio_asset_dd: str = _SRC_DEFAULT,
+    audio_upload=None,
     progress=gr.Progress(track_tqdm=True),
 ):
     """Preprocess once, then run inference per selected emotion. Returns first result."""
@@ -592,6 +616,23 @@ def run_inference_gradio(
     except RuntimeError as e:
         raise gr.Error(f"전처리 실패: {e}")
 
+    def _resolve(upload, dropdown, asset_map):
+        if upload:
+            return upload
+        if dropdown and dropdown != _SRC_DEFAULT:
+            return asset_map.get(dropdown)
+        return None
+
+    identity_src = _resolve(identity_upload, identity_asset_dd, SAMPLE_IDENTITY) or identity_img
+    audio_src    = _resolve(audio_upload, audio_asset_dd, SAMPLE_AUDIO) or audio_wav
+
+    pose_override = _resolve(pose_upload, pose_asset_dd, SAMPLE_VIDEOS)
+    if pose_override and pose_override not in set(SAMPLE_VIDEOS.values()):
+        tmp_pose = os.path.join(TMP_DIR, "pose_override_cropped.mp4")
+        crop_video_to_25fps(pose_override, tmp_pose)
+        pose_override = tmp_pose
+    pose_src = pose_override or cropped_video
+
     results = {}  # display_name -> (sr_path, comparison_path)
     total = len(selected_display_names)
 
@@ -605,9 +646,10 @@ def run_inference_gradio(
             safe = display_name.replace(" ", "_").replace("[", "").replace("]", "")
             save_path = f"res/demo_{safe}.mp4"
             sr_path, comparison_path = run_single_inference(
-                identity_img, audio_wav, cropped_video, emo_e2v_path, save_path,
+                identity_src, audio_src, cropped_video, emo_e2v_path, save_path,
                 emotion_name=display_name,
                 use_sr=use_sr,
+                pose_video=pose_src,
             )
             results[display_name] = (sr_path, comparison_path)
     finally:
@@ -722,6 +764,46 @@ def build_gradio_app() -> gr.Blocks:
                     label="Super Resolution 적용 (256 → 512, GFPGAN)",
                     value=True,
                 )
+
+                with gr.Accordion("소스 설정 (선택 사항)", open=False):
+                    gr.Markdown(
+                        "기본값은 입력 비디오에서 자동으로 추출됩니다. "
+                        "파일을 업로드하거나 asset에서 선택하면 해당 소스로 대체됩니다."
+                    )
+                    with gr.Row():
+                        with gr.Column(scale=1):
+                            gr.Markdown("**Identity (얼굴 이미지)**")
+                            identity_asset_dd = gr.Dropdown(
+                                choices=[_SRC_DEFAULT] + list(SAMPLE_IDENTITY.keys()),
+                                value=_SRC_DEFAULT,
+                                label="asset/identity 선택",
+                            )
+                            identity_upload = gr.Image(
+                                type="filepath",
+                                label="또는 이미지 업로드",
+                            )
+                        with gr.Column(scale=1):
+                            gr.Markdown("**Pose Source (머리 포즈)**")
+                            pose_asset_dd = gr.Dropdown(
+                                choices=[_SRC_DEFAULT] + list(SAMPLE_VIDEOS.keys()),
+                                value=_SRC_DEFAULT,
+                                label="asset/video 선택",
+                            )
+                            pose_upload = gr.Video(
+                                sources=["upload"],
+                                label="또는 비디오 업로드",
+                            )
+                        with gr.Column(scale=1):
+                            gr.Markdown("**Audio Source (립싱크)**")
+                            audio_asset_dd = gr.Dropdown(
+                                choices=[_SRC_DEFAULT] + list(SAMPLE_AUDIO.keys()),
+                                value=_SRC_DEFAULT,
+                                label="asset/audio 선택",
+                            )
+                            audio_upload = gr.Audio(
+                                type="filepath",
+                                label="또는 오디오 업로드",
+                            )
 
                 with gr.Row():
                     back_to_record = gr.Button("← Back to Record")
@@ -855,7 +937,12 @@ def build_gradio_app() -> gr.Blocks:
             outputs=[tabs, status_md, result_video, comparison_video, result_selector],
         ).then(
             fn=run_inference_gradio,
-            inputs=[video_state, emotion_checkboxes, sr_checkbox],
+            inputs=[
+                video_state, emotion_checkboxes, sr_checkbox,
+                identity_asset_dd, identity_upload,
+                pose_asset_dd, pose_upload,
+                audio_asset_dd, audio_upload,
+            ],
             outputs=[result_video, comparison_video, result_selector, results_state],
         ).then(
             fn=lambda: "✅ 추론 완료! 아래에서 결과를 확인하세요.",
