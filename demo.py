@@ -60,6 +60,13 @@ HF_CHECKPOINT_FILENAME = "checkpoints/_epoch_2105_checkpoint_step000200000.pth"
 
 TMP_DIR = "tmp_demo"
 
+SAMPLE_VIDEO_DIR = "asset/video"
+SAMPLE_VIDEOS = {
+    name: os.path.join(SAMPLE_VIDEO_DIR, name)
+    for name in sorted(os.listdir(SAMPLE_VIDEO_DIR))
+    if name.endswith(".mp4")
+} if os.path.isdir(SAMPLE_VIDEO_DIR) else {}
+
 # Build unique display names and a lookup map
 EMOTION_DISPLAY_NAMES = []
 EMOTION_DISPLAY_MAP = {}  # display_name -> (name, group, e2v_path)
@@ -464,6 +471,7 @@ def run_single_inference(
     emo_e2v_path: str,
     save_path: str,
     emotion_name: str = "",
+    use_sr: bool = True,
     num_samples: int = 10,
 ):
     device        = _MODELS["device"]
@@ -541,7 +549,7 @@ def run_single_inference(
     os.system(cmd)
     os.remove(temp_path)
 
-    sr_path = apply_super_resolution(save_path)
+    sr_path = apply_super_resolution(save_path) if use_sr else save_path
     comparison_path = create_comparison_video(cropped_video, sr_path, emotion_name)
     return sr_path, comparison_path
 
@@ -567,6 +575,7 @@ def get_audio_sample(display_name: str):
 def run_inference_gradio(
     video_path,
     selected_display_names,
+    use_sr: bool = True,
     progress=gr.Progress(track_tqdm=True),
 ):
     """Preprocess once, then run inference per selected emotion. Returns first result."""
@@ -598,6 +607,7 @@ def run_inference_gradio(
             sr_path, comparison_path = run_single_inference(
                 identity_img, audio_wav, cropped_video, emo_e2v_path, save_path,
                 emotion_name=display_name,
+                use_sr=use_sr,
             )
             results[display_name] = (sr_path, comparison_path)
     finally:
@@ -665,6 +675,23 @@ def build_gradio_app() -> gr.Blocks:
                 )
                 video_status = gr.Markdown("")
 
+                if SAMPLE_VIDEOS:
+                    gr.Markdown("---\n#### 또는 샘플 비디오 사용")
+                    sample_dropdown = gr.Dropdown(
+                        choices=list(SAMPLE_VIDEOS.keys()),
+                        label="샘플 영상 선택",
+                        value=None,
+                    )
+                    sample_preview = gr.Video(
+                        label="샘플 미리보기",
+                        interactive=False,
+                        visible=False,
+                        height=300,
+                    )
+                    use_sample_btn = gr.Button(
+                        "샘플 비디오 사용 →", variant="secondary", size="lg"
+                    )
+
             # ── Stage 2: Select Emotions ──────────────────────────────
             with gr.Tab("② Select Emotions", id="tab_emotion"):
                 gr.Markdown("감정을 **복수 선택**하고, 오디오 샘플로 미리 들어보세요.")
@@ -689,6 +716,11 @@ def build_gradio_app() -> gr.Blocks:
                     autoplay=True,
                     visible=False,
                     interactive=False,
+                )
+
+                sr_checkbox = gr.Checkbox(
+                    label="Super Resolution 적용 (256 → 512, GFPGAN)",
+                    value=True,
                 )
 
                 with gr.Row():
@@ -747,6 +779,37 @@ def build_gradio_app() -> gr.Blocks:
             outputs=[video_status, tabs, video_state],
         )
 
+        if SAMPLE_VIDEOS:
+            def on_sample_select(name):
+                if not name:
+                    return gr.update(visible=False)
+                return gr.update(value=SAMPLE_VIDEOS[name], visible=True)
+
+            sample_dropdown.change(
+                on_sample_select,
+                inputs=[sample_dropdown],
+                outputs=[sample_preview],
+            )
+
+            def on_use_sample(name):
+                if not name:
+                    return (
+                        gr.update(value="⚠️ 샘플 영상을 선택해주세요."),
+                        gr.update(),
+                        None,
+                    )
+                return (
+                    gr.update(value=f"✅ 샘플 '{name}' 설정되었습니다. Stage 2로 이동하세요."),
+                    gr.update(selected="tab_emotion"),
+                    SAMPLE_VIDEOS[name],
+                )
+
+            use_sample_btn.click(
+                on_use_sample,
+                inputs=[sample_dropdown],
+                outputs=[video_status, tabs, video_state],
+            )
+
         def on_emotion_change(selected):
             if not selected:
                 return "선택된 감정: **없음**"
@@ -792,7 +855,7 @@ def build_gradio_app() -> gr.Blocks:
             outputs=[tabs, status_md, result_video, comparison_video, result_selector],
         ).then(
             fn=run_inference_gradio,
-            inputs=[video_state, emotion_checkboxes],
+            inputs=[video_state, emotion_checkboxes, sr_checkbox],
             outputs=[result_video, comparison_video, result_selector, results_state],
         ).then(
             fn=lambda: "✅ 추론 완료! 아래에서 결과를 확인하세요.",
