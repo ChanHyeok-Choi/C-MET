@@ -270,6 +270,83 @@ def preprocess(input_video: str, tmp_dir: str):
     return identity_img, audio_wav, cropped_video
 
 
+def apply_super_resolution(video_path: str) -> str:
+    """Apply GFPGAN face SR (256 → 512). Returns the enhanced video path."""
+    try:
+        from src.EDTalk.face_sr.face_enhancer import enhancer_list
+    except ImportError:
+        print("gfpgan not available — skipping super resolution.")
+        return video_path
+
+    sr_path = video_path.replace(".mp4", "_sr.mp4")
+    tmp_path = sr_path + ".tmp.mp4"
+    print("Applying super resolution (GFPGAN)...")
+    imageio.mimsave(
+        tmp_path,
+        enhancer_list(video_path, method="gfpgan", bg_upsampler=None),
+        fps=float(25),
+    )
+    audio_clip = AudioFileClip(video_path)
+    video_clip = VideoFileClip(tmp_path)
+    video_clip.set_audio(audio_clip).write_videofile(
+        sr_path, codec="libx264", audio_codec="aac", logger=None
+    )
+    os.remove(tmp_path)
+    return sr_path
+
+
+def create_comparison_video(input_video: str, result_video: str, emotion_name: str) -> str:
+    """Create side-by-side comparison: input (left) | result (right) with text labels."""
+    comparison_path = result_video.replace(".mp4", "_comparison.mp4")
+    tmp_path = comparison_path + ".tmp.mp4"
+
+    cap_in  = cv2.VideoCapture(input_video)
+    cap_out = cv2.VideoCapture(result_video)
+
+    frames = []
+    while True:
+        ret_in,  frame_in  = cap_in.read()
+        ret_out, frame_out = cap_out.read()
+        if not ret_in or not ret_out:
+            break
+
+        h, w = frame_out.shape[:2]
+        frame_in = cv2.resize(frame_in, (w, h))
+
+        font       = cv2.FONT_HERSHEY_DUPLEX
+        scale      = w / 512 * 0.8
+        thickness  = max(1, int(w / 256))
+        white      = (255, 255, 255)
+        black      = (0, 0, 0)
+        y_pos      = max(30, int(h * 0.07))
+
+        for text, frame in [("Input Video", frame_in), (emotion_name, frame_out)]:
+            cv2.putText(frame, text, (10, y_pos), font, scale, black, thickness + 2)
+            cv2.putText(frame, text, (10, y_pos), font, scale, white, thickness)
+
+        combined = np.concatenate(
+            [cv2.cvtColor(frame_in, cv2.COLOR_BGR2RGB),
+             cv2.cvtColor(frame_out, cv2.COLOR_BGR2RGB)],
+            axis=1,
+        )
+        frames.append(combined)
+
+    cap_in.release()
+    cap_out.release()
+
+    if not frames:
+        return result_video
+
+    imageio.mimsave(tmp_path, frames, fps=float(25))
+    audio_clip = AudioFileClip(result_video)
+    video_clip = VideoFileClip(tmp_path)
+    video_clip.set_audio(audio_clip).write_videofile(
+        comparison_path, codec="libx264", audio_codec="aac", logger=None
+    )
+    os.remove(tmp_path)
+    return comparison_path
+
+
 def load_e2v_direction(neu_path: str, emo_path: str, num_samples: int = 10):
     neu_files = [
         os.path.join(neu_path, f) for f in os.listdir(neu_path) if f.endswith(".npy")
@@ -306,6 +383,7 @@ def run_single_inference(
     cropped_video: str,
     emo_e2v_path: str,
     save_path: str,
+    emotion_name: str = "",
     num_samples: int = 10,
 ):
     device        = _MODELS["device"]
@@ -383,6 +461,10 @@ def run_single_inference(
     os.system(cmd)
     os.remove(temp_path)
 
+    sr_path = apply_super_resolution(save_path)
+    comparison_path = create_comparison_video(cropped_video, sr_path, emotion_name)
+    return sr_path, comparison_path
+
 
 # ---------------------------------------------------------------------------
 # Gradio-specific helpers
@@ -421,7 +503,7 @@ def run_inference_gradio(
     except RuntimeError as e:
         raise gr.Error(f"전처리 실패: {e}")
 
-    results = {}  # display_name -> save_path
+    results = {}  # display_name -> (sr_path, comparison_path)
     total = len(selected_display_names)
 
     try:
@@ -433,21 +515,24 @@ def run_inference_gradio(
             _, _, emo_e2v_path = EMOTION_DISPLAY_MAP[display_name]
             safe = display_name.replace(" ", "_").replace("[", "").replace("]", "")
             save_path = f"res/demo_{safe}.mp4"
-            run_single_inference(
-                identity_img, audio_wav, cropped_video, emo_e2v_path, save_path
+            sr_path, comparison_path = run_single_inference(
+                identity_img, audio_wav, cropped_video, emo_e2v_path, save_path,
+                emotion_name=display_name,
             )
-            results[display_name] = save_path
+            results[display_name] = (sr_path, comparison_path)
     finally:
         shutil.rmtree(TMP_DIR, ignore_errors=True)
 
     progress(1.0, desc="완료!")
 
     first_display = selected_display_names[0]
+    first_sr, first_cmp = results[first_display]
     choices = list(results.keys())
     multi = len(choices) > 1
 
     return (
-        gr.update(value=results[first_display], visible=True),
+        gr.update(value=first_sr, visible=True),
+        gr.update(value=first_cmp, visible=True),
         gr.update(choices=choices, value=first_display, visible=multi),
         results,
     )
@@ -473,13 +558,27 @@ def build_gradio_app() -> gr.Blocks:
             # ── Stage 1: Record ───────────────────────────────────────
             with gr.Tab("① Record Video", id="tab_record"):
                 gr.Markdown(
-                    "웹캠으로 영상을 **촬영**하거나 파일을 **업로드**하세요.\n\n"
-                    "촬영 완료 후 **Use This Video →** 버튼을 클릭하면 Stage 2로 이동합니다."
+                    "**웹캠 촬영** 또는 **비디오 파일 업로드** 중 하나를 선택하세요.\n\n"
+                    "입력 완료 후 **Use This Video →** 버튼을 클릭하면 Stage 2로 이동합니다."
                 )
+                with gr.Row():
+                    btn_webcam_mode = gr.Button(
+                        "📷 웹캠으로 촬영", variant="secondary", size="sm"
+                    )
+                    btn_upload_mode = gr.Button(
+                        "📁 비디오 파일 업로드", variant="primary", size="sm"
+                    )
                 webcam_input = gr.Video(
-                    sources=["webcam", "upload"],
-                    label="Video Input",
+                    sources=["webcam"],
+                    label="웹캠 촬영",
                     height=400,
+                    visible=False,
+                )
+                upload_input = gr.Video(
+                    sources=["upload"],
+                    label="비디오 파일 업로드",
+                    height=400,
+                    visible=True,
                 )
                 use_video_btn = gr.Button(
                     "Use This Video →", variant="primary", size="lg"
@@ -525,7 +624,13 @@ def build_gradio_app() -> gr.Blocks:
                     choices=[], label="결과 선택 (감정)", visible=False
                 )
                 result_video = gr.Video(
-                    label="Result",
+                    label="생성 결과 (SR 적용)",
+                    visible=False,
+                    height=400,
+                )
+                gr.Markdown("---\n#### 입력 vs 결과 비교")
+                comparison_video = gr.Video(
+                    label="비교 영상 (Input | 결과)",
                     visible=False,
                     height=400,
                 )
@@ -533,7 +638,17 @@ def build_gradio_app() -> gr.Blocks:
 
         # ── Event wiring ─────────────────────────────────────────────
 
-        def on_use_video(video_path):
+        btn_webcam_mode.click(
+            fn=lambda: (gr.update(visible=True), gr.update(visible=False)),
+            outputs=[webcam_input, upload_input],
+        )
+        btn_upload_mode.click(
+            fn=lambda: (gr.update(visible=False), gr.update(visible=True)),
+            outputs=[webcam_input, upload_input],
+        )
+
+        def on_use_video(webcam_path, upload_path):
+            video_path = webcam_path or upload_path
             if video_path is None:
                 return (
                     gr.update(value="⚠️ 먼저 영상을 촬영하거나 업로드해주세요."),
@@ -548,7 +663,7 @@ def build_gradio_app() -> gr.Blocks:
 
         use_video_btn.click(
             on_use_video,
-            inputs=[webcam_input],
+            inputs=[webcam_input, upload_input],
             outputs=[video_status, tabs, video_state],
         )
 
@@ -592,22 +707,29 @@ def build_gradio_app() -> gr.Blocks:
                 "⏳ 추론 중입니다. 잠시 기다려주세요...",
                 gr.update(visible=False),
                 gr.update(visible=False),
+                gr.update(visible=False),
             ),
-            outputs=[tabs, status_md, result_video, result_selector],
+            outputs=[tabs, status_md, result_video, comparison_video, result_selector],
         ).then(
             fn=run_inference_gradio,
             inputs=[video_state, emotion_checkboxes],
-            outputs=[result_video, result_selector, results_state],
+            outputs=[result_video, comparison_video, result_selector, results_state],
         ).then(
             fn=lambda: "✅ 추론 완료! 아래에서 결과를 확인하세요.",
             outputs=[status_md],
         )
 
-        # Switch result video when dropdown changes
+        # Switch both videos when dropdown changes
+        def on_selector_change(name, res):
+            if not name or name not in res:
+                return gr.update(), gr.update()
+            sr_path, cmp_path = res[name]
+            return gr.update(value=sr_path), gr.update(value=cmp_path)
+
         result_selector.change(
-            fn=lambda name, res: gr.update(value=res.get(name)),
+            fn=on_selector_change,
             inputs=[result_selector, results_state],
-            outputs=[result_video],
+            outputs=[result_video, comparison_video],
         )
 
     return app
