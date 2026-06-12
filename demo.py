@@ -29,6 +29,7 @@ from src.util import (
     audio_preprocessing,
     conv_feat,
 )
+from src.EDTalk.networks.utils import check_package_installed
 
 # ---------------------------------------------------------------------------
 # Emotion catalogue
@@ -341,27 +342,26 @@ def preprocess(input_video: str, tmp_dir: str):
 
 def apply_super_resolution(video_path: str) -> str:
     """Apply GFPGAN face SR (256 → 512). Returns the enhanced video path."""
-    try:
-        from src.EDTalk.face_sr.face_enhancer import enhancer_list
-    except ImportError as e:
-        print(f"gfpgan not available ({e}) — skipping super resolution.")
+    if not check_package_installed("gfpgan"):
         return video_path
 
-    sr_path = video_path.replace(".mp4", "_sr.mp4")
-    tmp_path = sr_path + ".tmp.mp4"
+    from src.EDTalk.face_sr.face_enhancer import enhancer_list
+
+    out_path = video_path.replace(".mp4", "_512.mp4")
+    tmp_path = out_path + ".tmp.mp4"
     print("Applying super resolution (GFPGAN)...")
     imageio.mimsave(
         tmp_path,
         enhancer_list(video_path, method="gfpgan", bg_upsampler=None),
         fps=float(25),
+        codec="libx264",
     )
-    audio_clip = AudioFileClip(video_path)
     video_clip = VideoFileClip(tmp_path)
-    video_clip.set_audio(audio_clip).write_videofile(
-        sr_path, codec="libx264", audio_codec="aac", logger=None
-    )
+    audio_clip = AudioFileClip(video_path)
+    final_clip = video_clip.set_audio(audio_clip)
+    final_clip.write_videofile(out_path, codec="libx264", audio_codec="aac")
     os.remove(tmp_path)
-    return sr_path
+    return out_path
 
 
 def create_comparison_video(input_video: str, result_video: str, emotion_name: str) -> str:
