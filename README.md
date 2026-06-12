@@ -1,4 +1,4 @@
-<!-- # EDTalk -->
+<!-- # C-MET -->
 
 ### <div align="center"> 😄 Cross-Modal Emotion Transfer for Emotion Editing in Talking Face Video</div> 
 
@@ -75,6 +75,7 @@ conda activate C_MET
 
 - python packages
 ```
+pip install torch "cython<3"
 pip install -r requirements.txt
 ```
 

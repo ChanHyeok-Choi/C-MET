@@ -64,7 +64,7 @@ def crop_pad_audio(wav, audio_length):
         wav = np.pad(wav, [0, audio_length - len(wav)], mode='constant', constant_values=0)
     return wav
 
-def get_mel(audio_path):
+def get_mel(audio_path, device="cpu"):
 
     wav = audio.load_wav(audio_path, 16000) 
     wav_length, num_frames = parse_audio_length(len(wav), 16000, 25)
@@ -85,8 +85,8 @@ def get_mel(audio_path):
         m = spec[seq, :]
         indiv_mels.append(m.T)
     indiv_mels = np.asarray(indiv_mels)         # T 80 16
-    indiv_mels = torch.FloatTensor(indiv_mels).unsqueeze(1).unsqueeze(0).cuda()
-    source_audio_feature = indiv_mels.type(torch.FloatTensor).cuda()
+    indiv_mels = torch.FloatTensor(indiv_mels).unsqueeze(1).unsqueeze(0).to(device)
+    source_audio_feature = indiv_mels.type(torch.FloatTensor).to(device)
 
     mel_input = source_audio_feature                       # bs T 1 80 16
     bs = mel_input.shape[0]
@@ -96,8 +96,8 @@ def get_mel(audio_path):
     return audiox, bs, T
 
 
-def audio_preprocessing(wav_path):
-    source_audio_feature, bs, T = get_mel(wav_path)
+def audio_preprocessing(wav_path, device="cpu"):
+    source_audio_feature, bs, T = get_mel(wav_path, device=device)
 
     return source_audio_feature, bs, T
 
@@ -117,7 +117,7 @@ def conv_feat(features, k_size, weight=None, sigma=1.0):
         pad = k_size // 2
         print(k)
     
-    k = torch.from_numpy(k).to(features.device).float().unsqueeze(0).unsqueeze(0)
+    k = torch.from_numpy(k).float().to(features.device).unsqueeze(0).unsqueeze(0)
     k = k.repeat(c, 1, 1)
     features = features.unsqueeze(0).permute(0, 2, 1) # [1, 512, n]
     features = F.conv1d(features, k, padding=pad, groups=c)
