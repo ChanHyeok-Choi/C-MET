@@ -343,8 +343,8 @@ def apply_super_resolution(video_path: str) -> str:
     """Apply GFPGAN face SR (256 → 512). Returns the enhanced video path."""
     try:
         from src.EDTalk.face_sr.face_enhancer import enhancer_list
-    except ImportError:
-        print("gfpgan not available — skipping super resolution.")
+    except ImportError as e:
+        print(f"gfpgan not available ({e}) — skipping super resolution.")
         return video_path
 
     sr_path = video_path.replace(".mp4", "_sr.mp4")
