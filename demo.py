@@ -35,6 +35,7 @@ from src.voice_clone import (
     load_voice_cloning_models,
     transcribe_audio,
     clone_voice_with_emotion,
+    _display_to_emo_key,
 )
 
 # ---------------------------------------------------------------------------
@@ -89,6 +90,13 @@ SAMPLE_AUDIO = {
 } if os.path.isdir(SAMPLE_AUDIO_DIR) else {}
 
 _SRC_DEFAULT = "기본값 (입력 비디오에서)"
+
+# Emoknob emotion directions (used for voice cloning)
+EMOKNOB_EMOTIONS = [
+    'angry', 'charisma', 'contempt', 'desire', 'disgust', 'doubt',
+    'empathetic', 'empathic pain', 'envy', 'fear', 'happy', 'joy',
+    'neutral', 'romance', 'sad', 'sarcasm', 'surprise', 'tiredness', 'triump',
+]
 
 # Build unique display names and a lookup map
 EMOTION_DISPLAY_NAMES = []
@@ -684,15 +692,15 @@ def auto_transcribe_gradio(video_path):
 def generate_voice_gradio(
     video_path,
     transcribed_text,
-    selected_display_names,
+    vc_emotions,
     emotion_strength,
     progress=gr.Progress(track_tqdm=True),
 ):
-    """Generate emotion-controlled voice clones for each selected emotion."""
+    """Generate emotion-controlled voice clones for each selected emoknob emotion."""
     if not video_path:
         raise gr.Error("Stage 1에서 영상을 먼저 설정해주세요.")
-    if not selected_display_names:
-        raise gr.Error("감정을 하나 이상 선택해주세요.")
+    if not vc_emotions:
+        raise gr.Error("음성 생성할 감정을 하나 이상 선택해주세요.")
     if not transcribed_text or not transcribed_text.strip():
         raise gr.Error("전사된 텍스트가 없습니다. 텍스트를 직접 입력해주세요.")
 
@@ -707,27 +715,29 @@ def generate_voice_gradio(
     except RuntimeError as e:
         raise gr.Error(str(e))
 
-    voice_results = {}  # display_name → cloned audio path (no "원본" key)
-    total = len(selected_display_names)
+    voice_results = {}  # emoknob_emotion_key → cloned audio path
+    total = len(vc_emotions)
 
-    for i, display_name in enumerate(selected_display_names):
+    for i, emo_key in enumerate(vc_emotions):
         progress(
             (i + 0.1) / (total + 0.1),
-            desc=f"🎙 {display_name} 음성 생성 중... ({i + 1}/{total})",
+            desc=f"🎙 {emo_key} 음성 생성 중... ({i + 1}/{total})",
         )
-        safe = display_name.replace(" ", "_").replace("[", "").replace("]", "")
+        safe = emo_key.replace(" ", "_")
         out_path = os.path.join(TMP_VC_DIR, f"voice_{safe}.wav")
         try:
             clone_voice_with_emotion(
                 text=transcribed_text.strip(),
                 source_audio=source_audio,
-                emotion_display_name=display_name,
+                emotion_display_name=emo_key,
                 strength=emotion_strength,
                 output_path=out_path,
             )
-            voice_results[display_name] = out_path
+            voice_results[emo_key] = out_path
         except Exception as e:
-            print(f"[WARN] Voice cloning failed for {display_name}: {e}")
+            import traceback
+            print(f"[WARN] Voice cloning failed for {emo_key}: {e}")
+            traceback.print_exc()
 
     # Build dropdown choices: original first, then each cloned emotion
     choices = ["원본 (Original)"] + list(voice_results.keys())
@@ -801,8 +811,10 @@ def run_inference_gradio(
             save_path = f"res/demo_{safe}.mp4"
 
             # Use per-emotion voice-cloned audio if available; fall back to audio_src
-            if voice_results and display_name in voice_results:
-                emotion_audio = voice_results[display_name]
+            # voice_results keys are emoknob emotion keys, so convert display_name → emo_key
+            if voice_results:
+                emo_key = _display_to_emo_key(display_name)
+                emotion_audio = voice_results.get(emo_key, audio_src)
             else:
                 emotion_audio = audio_src
 
@@ -940,6 +952,10 @@ def build_gradio_app() -> gr.Blocks:
                 )
 
                 gr.Markdown("---\n#### 감정 음성 생성 (Voice Cloning)")
+                vc_emotion_checkboxes = gr.CheckboxGroup(
+                    choices=EMOKNOB_EMOTIONS,
+                    label="음성 감정 선택 (Emoknob 지원 감정)",
+                )
                 transcription_box = gr.Textbox(
                     label="전사된 텍스트 (자동 입력 · 편집 가능)",
                     placeholder="Stage 1에서 영상을 설정하면 자동으로 전사됩니다...",
@@ -1132,7 +1148,7 @@ def build_gradio_app() -> gr.Blocks:
             fn=generate_voice_gradio,
             inputs=[
                 video_state, transcription_box,
-                emotion_checkboxes, emotion_strength_slider,
+                vc_emotion_checkboxes, emotion_strength_slider,
             ],
             outputs=[
                 voice_result_dropdown, voice_result_audio,
@@ -1229,9 +1245,12 @@ def build_gradio_app() -> gr.Blocks:
 
         # Switch both videos when dropdown changes
         def on_selector_change(name, res):
+            print(f"[DEBUG] on_selector_change: name={name!r}, res_keys={list(res.keys()) if res else 'EMPTY'}")
             if not name or name not in res:
+                print(f"[DEBUG] early return — name_in_res={name in res if res else False}")
                 return gr.update(), gr.update()
             sr_path, cmp_path = res[name]
+            print(f"[DEBUG] returning sr={sr_path!r}, cmp={cmp_path!r}")
             return gr.update(value=sr_path), gr.update(value=cmp_path)
 
         result_selector.change(
@@ -1252,7 +1271,7 @@ def main():
     load_models()
     app = build_gradio_app()
     app.queue()
-    app.launch(inbrowser=True, server_name="0.0.0.0", server_port=7860)
+    app.launch(server_name="0.0.0.0", server_port=7860)
 
 
 if __name__ == "__main__":

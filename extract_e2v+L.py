@@ -12,7 +12,7 @@ import pandas as pd
 import argparse
 
 parser = argparse.ArgumentParser('')
-parser.add_argument('--root', default='', type=str, help='path/to/audios')
+parser.add_argument('--data_root', default='', type=str, help='path/to/audios')
 args = parser.parse_args()
 
 
@@ -23,7 +23,7 @@ model = AutoModel(
     hub="ms",  # "ms" or "modelscope" for China mainland users; "hf" or "huggingface" for other overseas users
 )
 
-data_root = args.root
+data_root = args.data_root
 if data_root == './dataset/MEAD/FPS25':
     ID_list = os.listdir(data_root)
     ID_list.sort()
