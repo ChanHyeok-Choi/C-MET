@@ -24,3 +24,4 @@ omegaconf
 funasr
 torchaudio
 gradio>=4.0
+openai-whisper

@@ -30,6 +30,12 @@ from src.util import (
     conv_feat,
 )
 from src.EDTalk.networks.utils import check_package_installed
+from src.voice_clone import (
+    is_vc_available,
+    load_voice_cloning_models,
+    transcribe_audio,
+    clone_voice_with_emotion,
+)
 
 # ---------------------------------------------------------------------------
 # Emotion catalogue
@@ -58,7 +64,8 @@ HF_REPO_ID = "coldhyuk/C-MET"
 PRETRAINED_WEIGHT_FILES = ["Audio2Lip.pt", "EDTalk.pt", "EDTalk-V.pt"]
 HF_CHECKPOINT_FILENAME = "checkpoints/_epoch_2105_checkpoint_step000200000.pth"
 
-TMP_DIR = "tmp_demo"
+TMP_DIR    = "tmp_demo"
+TMP_VC_DIR = "tmp_vc"
 
 SAMPLE_VIDEO_DIR = "asset/video"
 SAMPLE_VIDEOS = {
@@ -654,6 +661,88 @@ def get_audio_samples(display_name: str) -> list:
     return [os.path.join(audio_dir, f) for f in wavs]
 
 
+def auto_transcribe_gradio(video_path):
+    """Extract audio from video and transcribe with Whisper. Used as a .then() chain."""
+    if not video_path:
+        return gr.update(), gr.update()
+
+    os.makedirs(TMP_VC_DIR, exist_ok=True)
+    source_audio = os.path.join(TMP_VC_DIR, "source.wav")
+    extract_audio(video_path, source_audio)
+
+    try:
+        text = transcribe_audio(source_audio)
+    except Exception as e:
+        print(f"[WARN] Transcription failed: {e}")
+        text = ""
+
+    status = "✅ 영상이 설정되었습니다. 전사 완료. Stage 2로 이동하세요." if text else \
+             "✅ 영상이 설정되었습니다. (전사 실패 — 텍스트를 직접 입력하세요.)"
+    return gr.update(value=text), gr.update(value=status)
+
+
+def generate_voice_gradio(
+    video_path,
+    transcribed_text,
+    selected_display_names,
+    emotion_strength,
+    progress=gr.Progress(track_tqdm=True),
+):
+    """Generate emotion-controlled voice clones for each selected emotion."""
+    if not video_path:
+        raise gr.Error("Stage 1에서 영상을 먼저 설정해주세요.")
+    if not selected_display_names:
+        raise gr.Error("감정을 하나 이상 선택해주세요.")
+    if not transcribed_text or not transcribed_text.strip():
+        raise gr.Error("전사된 텍스트가 없습니다. 텍스트를 직접 입력해주세요.")
+
+    os.makedirs(TMP_VC_DIR, exist_ok=True)
+    source_audio = os.path.join(TMP_VC_DIR, "source.wav")
+    if not os.path.exists(source_audio):
+        extract_audio(video_path, source_audio)
+
+    progress(0.05, desc="MetaVoice 모델 로딩 중 (첫 실행 시 다소 시간이 걸립니다)...")
+    try:
+        load_voice_cloning_models(output_dir=TMP_VC_DIR)
+    except RuntimeError as e:
+        raise gr.Error(str(e))
+
+    voice_results = {}  # display_name → cloned audio path (no "원본" key)
+    total = len(selected_display_names)
+
+    for i, display_name in enumerate(selected_display_names):
+        progress(
+            (i + 0.1) / (total + 0.1),
+            desc=f"🎙 {display_name} 음성 생성 중... ({i + 1}/{total})",
+        )
+        safe = display_name.replace(" ", "_").replace("[", "").replace("]", "")
+        out_path = os.path.join(TMP_VC_DIR, f"voice_{safe}.wav")
+        try:
+            clone_voice_with_emotion(
+                text=transcribed_text.strip(),
+                source_audio=source_audio,
+                emotion_display_name=display_name,
+                strength=emotion_strength,
+                output_path=out_path,
+            )
+            voice_results[display_name] = out_path
+        except Exception as e:
+            print(f"[WARN] Voice cloning failed for {display_name}: {e}")
+
+    # Build dropdown choices: original first, then each cloned emotion
+    choices = ["원본 (Original)"] + list(voice_results.keys())
+    display_map = {"원본 (Original)": source_audio, **voice_results}
+
+    progress(1.0, desc="완료!")
+
+    return (
+        gr.update(choices=choices, value="원본 (Original)", visible=True),
+        gr.update(value=source_audio, visible=True),
+        voice_results,  # only emotion keys → stored in voice_results_state
+        display_map,    # includes "원본" → stored in voice_display_state for dropdown
+    )
+
+
 def run_inference_gradio(
     video_path,
     selected_display_names,
@@ -664,6 +753,7 @@ def run_inference_gradio(
     pose_upload=None,
     audio_asset_dd: str = _SRC_DEFAULT,
     audio_upload=None,
+    voice_results: dict = None,
     progress=gr.Progress(track_tqdm=True),
 ):
     """Preprocess once, then run inference per selected emotion. Returns first result."""
@@ -709,8 +799,15 @@ def run_inference_gradio(
             _, _, emo_e2v_path = EMOTION_DISPLAY_MAP[display_name]
             safe = display_name.replace(" ", "_").replace("[", "").replace("]", "")
             save_path = f"res/demo_{safe}.mp4"
+
+            # Use per-emotion voice-cloned audio if available; fall back to audio_src
+            if voice_results and display_name in voice_results:
+                emotion_audio = voice_results[display_name]
+            else:
+                emotion_audio = audio_src
+
             sr_path, comparison_path = run_single_inference(
-                identity_src, audio_src, cropped_video, emo_e2v_path, save_path,
+                identity_src, emotion_audio, cropped_video, emo_e2v_path, save_path,
                 emotion_name=display_name,
                 use_sr=use_sr,
                 pose_video=pose_src,
@@ -755,8 +852,10 @@ def build_gradio_app() -> gr.Blocks:
         )
 
         # Shared state
-        video_state   = gr.State(None)
-        results_state = gr.State({})
+        video_state        = gr.State(None)
+        results_state      = gr.State({})
+        voice_results_state = gr.State({})   # display_name → cloned audio path
+        voice_display_state = gr.State({})   # includes "원본" key for dropdown
 
         with gr.Tabs() as tabs:
 
@@ -808,9 +907,12 @@ def build_gradio_app() -> gr.Blocks:
                         "샘플 비디오 사용 →", variant="secondary", size="lg"
                     )
 
-            # ── Stage 2: Select Emotions ──────────────────────────────
-            with gr.Tab("② Select Emotions", id="tab_emotion"):
-                gr.Markdown("감정을 **복수 선택**하고, 오디오 샘플로 미리 들어보세요.")
+            # ── Stage 2: Emotions & Voice Cloning ────────────────────
+            with gr.Tab("② Emotions & Voice", id="tab_emotion"):
+                gr.Markdown(
+                    "감정을 선택하고 오디오 샘플을 미리 들어보세요.  \n"
+                    "그 다음 **감정 음성 생성**으로 입력 목소리에 감정을 입혀 확인하고 Stage 3으로 넘어가세요."
+                )
 
                 emotion_checkboxes = gr.CheckboxGroup(
                     choices=EMOTION_DISPLAY_NAMES,
@@ -818,7 +920,7 @@ def build_gradio_app() -> gr.Blocks:
                 )
                 selected_summary = gr.Markdown("선택된 감정: **없음**")
 
-                gr.Markdown("---\n#### 오디오 미리듣기")
+                gr.Markdown("---\n#### 오디오 샘플 미리듣기")
                 preview_dropdown = gr.Dropdown(
                     choices=EMOTION_DISPLAY_NAMES,
                     label="미리들을 감정",
@@ -830,10 +932,41 @@ def build_gradio_app() -> gr.Blocks:
                     interactive=True,
                 )
                 preview_btn = gr.Button("▶ Play", visible=False)
-
                 audio_preview = gr.Audio(
                     label="Emotion Sample",
                     autoplay=True,
+                    visible=False,
+                    interactive=False,
+                )
+
+                gr.Markdown("---\n#### 감정 음성 생성 (Voice Cloning)")
+                transcription_box = gr.Textbox(
+                    label="전사된 텍스트 (자동 입력 · 편집 가능)",
+                    placeholder="Stage 1에서 영상을 설정하면 자동으로 전사됩니다...",
+                    lines=3,
+                    interactive=True,
+                )
+                emotion_strength_slider = gr.Slider(
+                    minimum=0.1,
+                    maximum=1.0,
+                    value=0.3,
+                    step=0.05,
+                    label="감정 강도 (Emotion Strength)",
+                )
+                generate_voice_btn = gr.Button(
+                    "🎙 Generate Emotional Voice", variant="primary"
+                )
+
+                gr.Markdown("##### 음성 생성 결과 미리듣기")
+                voice_result_dropdown = gr.Dropdown(
+                    choices=[],
+                    label="결과 선택 (원본 / 감정별 클론)",
+                    visible=False,
+                    interactive=True,
+                )
+                voice_result_audio = gr.Audio(
+                    label="음성 미리듣기",
+                    autoplay=False,
                     visible=False,
                     interactive=False,
                 )
@@ -846,7 +979,7 @@ def build_gradio_app() -> gr.Blocks:
                 with gr.Accordion("소스 설정 (선택 사항)", open=False):
                     gr.Markdown(
                         "기본값은 입력 비디오에서 자동으로 추출됩니다. "
-                        "파일을 업로드하거나 asset에서 선택하면 해당 소스로 대체됩니다."
+                        "Voice Cloning을 사용하면 감정 음성이 lip sync 소스로 자동 적용됩니다."
                     )
                     with gr.Row():
                         with gr.Column(scale=1):
@@ -872,7 +1005,7 @@ def build_gradio_app() -> gr.Blocks:
                                 label="또는 비디오 업로드",
                             )
                         with gr.Column(scale=1):
-                            gr.Markdown("**Audio Source (립싱크)**")
+                            gr.Markdown("**Audio Source (립싱크 — Voice Cloning 미사용 시)**")
                             audio_asset_dd = gr.Dropdown(
                                 choices=[_SRC_DEFAULT] + list(SAMPLE_AUDIO.keys()),
                                 value=_SRC_DEFAULT,
@@ -943,6 +1076,10 @@ def build_gradio_app() -> gr.Blocks:
             on_use_video,
             inputs=[webcam_input, upload_input],
             outputs=[video_status, tabs, video_state],
+        ).then(
+            auto_transcribe_gradio,
+            inputs=[video_state],
+            outputs=[transcription_box, video_status],
         )
 
         if SAMPLE_VIDEOS:
@@ -974,6 +1111,10 @@ def build_gradio_app() -> gr.Blocks:
                 on_use_sample,
                 inputs=[sample_dropdown],
                 outputs=[video_status, tabs, video_state],
+            ).then(
+                auto_transcribe_gradio,
+                inputs=[video_state],
+                outputs=[transcription_box, video_status],
             )
 
         def on_emotion_change(selected):
@@ -985,6 +1126,29 @@ def build_gradio_app() -> gr.Blocks:
             on_emotion_change,
             inputs=[emotion_checkboxes],
             outputs=[selected_summary],
+        )
+
+        generate_voice_btn.click(
+            fn=generate_voice_gradio,
+            inputs=[
+                video_state, transcription_box,
+                emotion_checkboxes, emotion_strength_slider,
+            ],
+            outputs=[
+                voice_result_dropdown, voice_result_audio,
+                voice_results_state, voice_display_state,
+            ],
+        )
+
+        def on_voice_result_change(selected, display_map):
+            if not selected or not display_map or selected not in display_map:
+                return gr.update()
+            return gr.update(value=display_map[selected])
+
+        voice_result_dropdown.change(
+            on_voice_result_change,
+            inputs=[voice_result_dropdown, voice_display_state],
+            outputs=[voice_result_audio],
         )
 
         def on_emotion_preview_change(display_name):
@@ -1055,6 +1219,7 @@ def build_gradio_app() -> gr.Blocks:
                 identity_asset_dd, identity_upload,
                 pose_asset_dd, pose_upload,
                 audio_asset_dd, audio_upload,
+                voice_results_state,
             ],
             outputs=[result_video, comparison_video, result_selector, results_state, multi_comparison_video],
         ).then(
