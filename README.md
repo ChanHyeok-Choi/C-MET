@@ -69,7 +69,7 @@ cd C-MET
 
 ### Install dependency
 ```
-conda create -n C_MET python=3.8
+conda create -n C_MET python=3.9
 conda activate C_MET
 ```
 
