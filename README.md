@@ -75,7 +75,7 @@ conda activate C_MET
 
 - python packages
 ```
-pip install torch "cython<3"
+conda install -c conda-forge ffmpeg=4.4 pkg-config -y
 pip install -r requirements.txt
 ```
 
