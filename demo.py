@@ -644,18 +644,14 @@ def run_single_inference(
 # Gradio-specific helpers
 # ---------------------------------------------------------------------------
 
-def get_audio_sample(display_name: str):
-    """Return the path to a random .wav sample for the given emotion display name."""
+def get_audio_samples(display_name: str) -> list:
+    """Return all .wav sample paths for the given emotion display name."""
     if not display_name or display_name not in EMOTION_DISPLAY_MAP:
-        return None
+        return []
     _, _, e2v_path = EMOTION_DISPLAY_MAP[display_name]
     audio_dir = os.path.dirname(e2v_path)
-    wavs = [
-        os.path.join(audio_dir, f)
-        for f in os.listdir(audio_dir)
-        if f.endswith(".wav")
-    ]
-    return random.choice(wavs) if wavs else None
+    wavs = sorted([f for f in os.listdir(audio_dir) if f.endswith(".wav")])
+    return [os.path.join(audio_dir, f) for f in wavs]
 
 
 def run_inference_gradio(
@@ -823,13 +819,17 @@ def build_gradio_app() -> gr.Blocks:
                 selected_summary = gr.Markdown("선택된 감정: **없음**")
 
                 gr.Markdown("---\n#### 오디오 미리듣기")
-                with gr.Row():
-                    preview_dropdown = gr.Dropdown(
-                        choices=EMOTION_DISPLAY_NAMES,
-                        label="미리들을 감정",
-                        scale=3,
-                    )
-                    preview_btn = gr.Button("▶ Play Sample", scale=1)
+                preview_dropdown = gr.Dropdown(
+                    choices=EMOTION_DISPLAY_NAMES,
+                    label="미리들을 감정",
+                )
+                sample_choice_dropdown = gr.Dropdown(
+                    choices=[],
+                    label="샘플 선택",
+                    visible=False,
+                    interactive=True,
+                )
+                preview_btn = gr.Button("▶ Play", visible=False)
 
                 audio_preview = gr.Audio(
                     label="Emotion Sample",
@@ -987,15 +987,43 @@ def build_gradio_app() -> gr.Blocks:
             outputs=[selected_summary],
         )
 
-        def on_preview(display_name):
-            path = get_audio_sample(display_name)
+        def on_emotion_preview_change(display_name):
+            samples = get_audio_samples(display_name)
+            if not samples:
+                return (
+                    gr.update(choices=[], value=None, visible=False),
+                    gr.update(visible=False),
+                    gr.update(visible=False),
+                )
+            labels = [os.path.basename(p) for p in samples]
+            path_map = dict(zip(labels, samples))
+            first_label = labels[0]
+            return (
+                gr.update(choices=list(path_map.keys()), value=first_label, visible=True),
+                gr.update(visible=True),
+                gr.update(visible=False),
+            )
+
+        preview_dropdown.change(
+            on_emotion_preview_change,
+            inputs=[preview_dropdown],
+            outputs=[sample_choice_dropdown, preview_btn, audio_preview],
+        )
+
+        def on_preview(display_name, sample_label):
+            if not display_name or not sample_label:
+                return gr.update(visible=False)
+            samples = get_audio_samples(display_name)
+            labels = [os.path.basename(p) for p in samples]
+            path_map = dict(zip(labels, samples))
+            path = path_map.get(sample_label)
             if path is None:
                 return gr.update(visible=False)
             return gr.update(value=path, visible=True)
 
         preview_btn.click(
             on_preview,
-            inputs=[preview_dropdown],
+            inputs=[preview_dropdown, sample_choice_dropdown],
             outputs=[audio_preview],
         )
 
