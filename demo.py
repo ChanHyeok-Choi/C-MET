@@ -175,7 +175,7 @@ def load_models(config_path: str = "./configs/inference.yaml"):
     transformer_kwargs = OmegaConf.to_container(config.transformer_kwargs, resolve=True)
 
     audio2lip = Audio2Lip().to(device)
-    w = torch.load(config.audio2lip_model_path, map_location=lambda s, l: s)["audio2lip"]
+    w = torch.load(config.audio2lip_model_path, weights_only=False, map_location=lambda s, l: s)["audio2lip"]
     audio2lip.load_state_dict(w)
     audio2lip.eval()
 
@@ -187,12 +187,12 @@ def load_models(config_path: str = "./configs/inference.yaml"):
         exp_dim=pretrained_EDTalk["latent_dim_exp"],
         channel_multiplier=pretrained_EDTalk["channel_multiplier"],
     ).to(device)
-    w = torch.load(pretrained_EDTalk["model_path"], map_location=lambda s, l: s)["gen"]
+    w = torch.load(pretrained_EDTalk["model_path"], weights_only=False, map_location=lambda s, l: s)["gen"]
     gen.load_state_dict(w)
     gen.eval()
 
     connector_exp = Connector_exp(projector_kwargs, transformer_kwargs, device).to(device)
-    w = torch.load(config.connector_exp_path, map_location=lambda s, l: s)
+    w = torch.load(config.connector_exp_path, weights_only=False, map_location=lambda s, l: s)
     connector_exp.load_state_dict(w["state_dict"])
     connector_exp.eval()
 
