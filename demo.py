@@ -63,13 +63,6 @@ from src.util import (
     conv_feat,
 )
 from src.EDTalk.networks.utils import check_package_installed
-from src.voice_clone import (
-    is_vc_available,
-    load_voice_cloning_models,
-    transcribe_audio,
-    clone_voice_with_emotion,
-    _display_to_emo_key,
-)
 
 # ---------------------------------------------------------------------------
 # Emotion catalogue
@@ -98,8 +91,7 @@ HF_REPO_ID = "coldhyuk/C-MET"
 PRETRAINED_WEIGHT_FILES = ["Audio2Lip.pt", "EDTalk.pt", "EDTalk-V.pt"]
 HF_CHECKPOINT_FILENAME = "checkpoints/_epoch_2105_checkpoint_step000200000.pth"
 
-TMP_DIR    = "tmp_demo"
-TMP_VC_DIR = "tmp_vc"
+TMP_DIR = "tmp_demo"
 
 SAMPLE_VIDEO_DIR = "asset/video"
 SAMPLE_VIDEOS = {
@@ -122,14 +114,7 @@ SAMPLE_AUDIO = {
     if name.lower().endswith(".wav")
 } if os.path.isdir(SAMPLE_AUDIO_DIR) else {}
 
-_SRC_DEFAULT = "기본값 (입력 비디오에서)"
-
-# Emoknob emotion directions (used for voice cloning)
-EMOKNOB_EMOTIONS = [
-    'angry', 'charisma', 'contempt', 'desire', 'disgust', 'doubt',
-    'empathetic', 'empathic pain', 'envy', 'fear', 'happy', 'joy',
-    'neutral', 'romance', 'sad', 'sarcasm', 'surprise', 'tiredness', 'triump',
-]
+_SRC_DEFAULT = "선택 안 함"
 
 # Build unique display names and a lookup map
 EMOTION_DISPLAY_NAMES = []
@@ -379,6 +364,58 @@ def extract_identity_frame(cropped_video_path: str, out_path: str):
     if not ok:
         raise RuntimeError(f"Cannot read cropped video: {cropped_video_path}")
     cv2.imwrite(out_path, frame)
+
+
+def crop_image_to_face(input_path: str, out_path: str, increase_area: float = 0.1):
+    """Face-crop a single image using the same aspect-preserving padding as
+    crop_video_to_25fps, but detecting on a single frame instead of a trajectory."""
+    frame_bgr = cv2.imread(input_path)
+    if frame_bgr is None:
+        raise RuntimeError(f"Cannot read image: {input_path}")
+    frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+
+    fa = face_alignment.FaceAlignment(
+        face_alignment.LandmarksType.TWO_D,
+        flip_input=False,
+        device=get_fa_device(),
+    )
+    bboxes = _detect_bboxes(frame_rgb, fa)
+    if len(bboxes) == 0:
+        raise RuntimeError("이미지에서 얼굴을 감지할 수 없습니다. 다른 이미지를 사용해주세요.")
+
+    left, top, right, bot = bboxes[0]
+    bw, bh = right - left, bot - top
+    h, w = frame_rgb.shape[:2]
+    w_inc = max(increase_area, ((1 + 2 * increase_area) * bh - bw) / (2 * bw))
+    h_inc = max(increase_area, ((1 + 2 * increase_area) * bw - bh) / (2 * bh))
+    left  = max(0, int(left  - w_inc * bw))
+    top   = max(0, int(top   - h_inc * bh))
+    right = min(w, int(right + w_inc * bw))
+    bot   = min(h, int(bot   + h_inc * bh))
+
+    cropped = cv2.resize(frame_bgr[top:bot, left:right], (256, 256))
+    cv2.imwrite(out_path, cropped)
+
+
+def prepare_combo_identity_video(
+    identity_img_path: str,
+    cropped_identity_img_path: str,
+    out_video_path: str,
+    num_frames: int = 50,
+    fps: int = 25,
+):
+    """Face-crop the identity image and repeat it into a short pseudo-video.
+
+    run_single_inference needs a multi-frame 'cropped_video' to compute the
+    ED_neu baseline via gen.compute_alpha_D — that call batches per-frame with
+    no temporal coupling, so repeating one identity frame T times yields a
+    constant, identity-only neutral baseline instead of borrowing one from a
+    separate pose-actor video.
+    """
+    crop_image_to_face(identity_img_path, cropped_identity_img_path)
+    frame_bgr = cv2.imread(cropped_identity_img_path)
+    frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+    imageio.mimsave(out_video_path, [frame_rgb] * num_frames, fps=float(fps))
 
 
 def _write_silent_wav(out_path: str, sr: int = 16000, duration: float = 60.0):
@@ -702,106 +739,36 @@ def get_audio_samples(display_name: str) -> list:
     return [os.path.join(audio_dir, f) for f in wavs]
 
 
-def auto_transcribe_gradio(video_path):
-    """Extract audio from video and transcribe with Whisper. Used as a .then() chain."""
-    if not video_path:
-        return gr.update(), gr.update()
+def _preprocess_combo_input(input_state: dict, tmp_dir: str):
+    """Combo mode: identity image + audio + pose video, no main video.
 
-    os.makedirs(TMP_VC_DIR, exist_ok=True)
-    source_audio = os.path.join(TMP_VC_DIR, "source.wav")
-    extract_audio(video_path, source_audio)
+    cropped_video is replaced by a short repeated-frame pseudo-video built
+    from the identity image (see prepare_combo_identity_video) so the
+    ED_neu baseline reflects the identity, not a separate pose actor.
+    """
+    if os.path.exists(tmp_dir):
+        shutil.rmtree(tmp_dir)
+    os.makedirs(tmp_dir)
 
-    try:
-        text = transcribe_audio(source_audio)
-    except Exception as e:
-        print(f"[WARN] Transcription failed: {e}")
-        text = ""
+    identity_img    = os.path.join(tmp_dir, "identity.png")
+    identity_pseudo = os.path.join(tmp_dir, "identity_pseudo.mp4")
+    pose_cropped    = os.path.join(tmp_dir, "pose_cropped.mp4")
 
-    status = "✅ 영상이 설정되었습니다. 전사 완료. Stage 2로 이동하세요." if text else \
-             "✅ 영상이 설정되었습니다. (전사 실패 — 텍스트를 직접 입력하세요.)"
-    return gr.update(value=text), gr.update(value=status)
+    prepare_combo_identity_video(input_state["identity"], identity_img, identity_pseudo)
+    crop_video_to_25fps(input_state["pose"], pose_cropped)
 
-
-def generate_voice_gradio(
-    video_path,
-    transcribed_text,
-    vc_emotions,
-    emotion_strength,
-    progress=gr.Progress(track_tqdm=True),
-):
-    """Generate emotion-controlled voice clones for each selected emoknob emotion."""
-    if not video_path:
-        raise gr.Error("Stage 1에서 영상을 먼저 설정해주세요.")
-    if not vc_emotions:
-        raise gr.Error("음성 생성할 감정을 하나 이상 선택해주세요.")
-    if not transcribed_text or not transcribed_text.strip():
-        raise gr.Error("전사된 텍스트가 없습니다. 텍스트를 직접 입력해주세요.")
-
-    os.makedirs(TMP_VC_DIR, exist_ok=True)
-    source_audio = os.path.join(TMP_VC_DIR, "source.wav")
-    if not os.path.exists(source_audio):
-        extract_audio(video_path, source_audio)
-
-    progress(0.05, desc="MetaVoice 모델 로딩 중 (첫 실행 시 다소 시간이 걸립니다)...")
-    try:
-        load_voice_cloning_models(output_dir=TMP_VC_DIR)
-    except RuntimeError as e:
-        raise gr.Error(str(e))
-
-    voice_results = {}  # emoknob_emotion_key → cloned audio path
-    total = len(vc_emotions)
-
-    for i, emo_key in enumerate(vc_emotions):
-        progress(
-            (i + 0.1) / (total + 0.1),
-            desc=f"🎙 {emo_key} 음성 생성 중... ({i + 1}/{total})",
-        )
-        safe = emo_key.replace(" ", "_")
-        out_path = os.path.join(TMP_VC_DIR, f"voice_{safe}.wav")
-        try:
-            clone_voice_with_emotion(
-                text=transcribed_text.strip(),
-                source_audio=source_audio,
-                emotion_display_name=emo_key,
-                strength=emotion_strength,
-                output_path=out_path,
-            )
-            voice_results[emo_key] = out_path
-        except Exception as e:
-            import traceback
-            print(f"[WARN] Voice cloning failed for {emo_key}: {e}")
-            traceback.print_exc()
-
-    # Build dropdown choices: original first, then each cloned emotion
-    choices = ["원본 (Original)"] + list(voice_results.keys())
-    display_map = {"원본 (Original)": source_audio, **voice_results}
-
-    progress(1.0, desc="완료!")
-
-    return (
-        gr.update(choices=choices, value="원본 (Original)", visible=True),
-        gr.update(value=source_audio, visible=True),
-        voice_results,  # only emotion keys → stored in voice_results_state
-        display_map,    # includes "원본" → stored in voice_display_state for dropdown
-    )
+    return identity_img, input_state["audio"], identity_pseudo, pose_cropped
 
 
 def run_inference_gradio(
-    video_path,
+    input_state,
     selected_display_names,
     use_sr: bool = True,
-    identity_asset_dd: str = _SRC_DEFAULT,
-    identity_upload=None,
-    pose_asset_dd: str = _SRC_DEFAULT,
-    pose_upload=None,
-    audio_asset_dd: str = _SRC_DEFAULT,
-    audio_upload=None,
-    voice_results: dict = None,
     progress=gr.Progress(track_tqdm=True),
 ):
     """Preprocess once, then run inference per selected emotion. Returns first result."""
-    if not video_path:
-        raise gr.Error("Stage 1에서 영상을 먼저 설정해주세요.")
+    if not input_state:
+        raise gr.Error("Stage 1에서 입력을 먼저 설정해주세요.")
     if not selected_display_names:
         raise gr.Error("감정을 하나 이상 선택해주세요.")
 
@@ -809,26 +776,15 @@ def run_inference_gradio(
     progress(0, desc="전처리 중...")
 
     try:
-        identity_img, audio_wav, cropped_video = preprocess(video_path, TMP_DIR)
+        if input_state["mode"] == "video":
+            identity_img, audio_src, cropped_video = preprocess(input_state["video"], TMP_DIR)
+            pose_src = cropped_video
+        else:
+            identity_img, audio_src, cropped_video, pose_src = _preprocess_combo_input(
+                input_state, TMP_DIR
+            )
     except RuntimeError as e:
         raise gr.Error(f"전처리 실패: {e}")
-
-    def _resolve(upload, dropdown, asset_map):
-        if upload:
-            return upload
-        if dropdown and dropdown != _SRC_DEFAULT:
-            return asset_map.get(dropdown)
-        return None
-
-    identity_src = _resolve(identity_upload, identity_asset_dd, SAMPLE_IDENTITY) or identity_img
-    audio_src    = _resolve(audio_upload, audio_asset_dd, SAMPLE_AUDIO) or audio_wav
-
-    pose_override = _resolve(pose_upload, pose_asset_dd, SAMPLE_VIDEOS)
-    if pose_override and pose_override not in set(SAMPLE_VIDEOS.values()):
-        tmp_pose = os.path.join(TMP_DIR, "pose_override_cropped.mp4")
-        crop_video_to_25fps(pose_override, tmp_pose)
-        pose_override = tmp_pose
-    pose_src = pose_override or cropped_video
 
     results = {}  # display_name -> (sr_path, comparison_path)
     total = len(selected_display_names)
@@ -843,16 +799,8 @@ def run_inference_gradio(
             safe = display_name.replace(" ", "_").replace("[", "").replace("]", "")
             save_path = f"res/demo_{safe}.mp4"
 
-            # Use per-emotion voice-cloned audio if available; fall back to audio_src
-            # voice_results keys are emoknob emotion keys, so convert display_name → emo_key
-            if voice_results:
-                emo_key = _display_to_emo_key(display_name)
-                emotion_audio = voice_results.get(emo_key, audio_src)
-            else:
-                emotion_audio = audio_src
-
             sr_path, comparison_path = run_single_inference(
-                identity_src, emotion_audio, cropped_video, emo_e2v_path, save_path,
+                identity_img, audio_src, cropped_video, emo_e2v_path, save_path,
                 emotion_name=display_name,
                 use_sr=use_sr,
                 pose_video=pose_src,
@@ -897,66 +845,114 @@ def build_gradio_app() -> gr.Blocks:
         )
 
         # Shared state
-        video_state        = gr.State(None)
-        results_state      = gr.State({})
-        voice_results_state = gr.State({})   # display_name → cloned audio path
-        voice_display_state = gr.State({})   # includes "원본" key for dropdown
+        input_state   = gr.State(None)  # {"mode": "video", "video": p} | {"mode": "combo", "identity": p, "audio": p, "pose": p}
+        results_state = gr.State({})
 
         with gr.Tabs() as tabs:
 
-            # ── Stage 1: Record ───────────────────────────────────────
-            with gr.Tab("① Record Video", id="tab_record"):
-                gr.Markdown(
-                    "**웹캠 촬영** 또는 **비디오 파일 업로드** 중 하나를 선택하세요.\n\n"
-                    "입력 완료 후 **Use This Video →** 버튼을 클릭하면 Stage 2로 이동합니다."
+            # ── Stage 1: Input ─────────────────────────────────────────
+            with gr.Tab("① Input", id="tab_record"):
+                input_mode_radio = gr.Radio(
+                    choices=["비디오로 입력", "Identity + Audio + Pose 조합"],
+                    value="비디오로 입력",
+                    label="입력 방식",
                 )
-                with gr.Row():
-                    btn_webcam_mode = gr.Button(
-                        "📷 웹캠으로 촬영", variant="secondary", size="sm"
-                    )
-                    btn_upload_mode = gr.Button(
-                        "📁 비디오 파일 업로드", variant="primary", size="sm"
-                    )
-                webcam_input = gr.Video(
-                    sources=["webcam"],
-                    include_audio=True,
-                    label="웹캠 촬영",
-                    height=400,
-                    visible=False,
-                )
-                upload_input = gr.Video(
-                    sources=["upload"],
-                    label="비디오 파일 업로드",
-                    height=400,
-                    visible=True,
-                )
-                use_video_btn = gr.Button(
-                    "Use This Video →", variant="primary", size="lg"
-                )
-                video_status = gr.Markdown("")
 
-                if SAMPLE_VIDEOS:
-                    gr.Markdown("---\n#### 또는 샘플 비디오 사용")
-                    sample_dropdown = gr.Dropdown(
-                        choices=list(SAMPLE_VIDEOS.keys()),
-                        label="샘플 영상 선택",
-                        value=None,
+                with gr.Group(visible=True) as video_mode_group:
+                    gr.Markdown(
+                        "**웹캠 촬영** 또는 **비디오 파일 업로드** 중 하나를 선택하세요.\n\n"
+                        "입력 완료 후 **Use This Video →** 버튼을 클릭하면 Stage 2로 이동합니다."
                     )
-                    sample_preview = gr.Video(
-                        label="샘플 미리보기",
-                        interactive=False,
+                    with gr.Row():
+                        btn_webcam_mode = gr.Button(
+                            "📷 웹캠으로 촬영", variant="secondary", size="sm"
+                        )
+                        btn_upload_mode = gr.Button(
+                            "📁 비디오 파일 업로드", variant="primary", size="sm"
+                        )
+                    webcam_input = gr.Video(
+                        sources=["webcam"],
+                        include_audio=True,
+                        label="웹캠 촬영",
+                        height=400,
                         visible=False,
-                        height=300,
                     )
-                    use_sample_btn = gr.Button(
-                        "샘플 비디오 사용 →", variant="secondary", size="lg"
+                    upload_input = gr.Video(
+                        sources=["upload"],
+                        label="비디오 파일 업로드",
+                        height=400,
+                        visible=True,
                     )
+                    use_video_btn = gr.Button(
+                        "Use This Video →", variant="primary", size="lg"
+                    )
+                    video_status = gr.Markdown("")
 
-            # ── Stage 2: Emotions & Voice Cloning ────────────────────
-            with gr.Tab("② Emotions & Voice", id="tab_emotion"):
+                    if SAMPLE_VIDEOS:
+                        gr.Markdown("---\n#### 또는 샘플 비디오 사용")
+                        sample_dropdown = gr.Dropdown(
+                            choices=list(SAMPLE_VIDEOS.keys()),
+                            label="샘플 영상 선택",
+                            value=None,
+                        )
+                        sample_preview = gr.Video(
+                            label="샘플 미리보기",
+                            interactive=False,
+                            visible=False,
+                            height=300,
+                        )
+                        use_sample_btn = gr.Button(
+                            "샘플 비디오 사용 →", variant="secondary", size="lg"
+                        )
+
+                with gr.Group(visible=False) as combo_mode_group:
+                    gr.Markdown(
+                        "**Identity 이미지**, **Audio**, **Pose 영상**을 각각 설정하세요.\n\n"
+                        "모두 설정 후 **Use This Input →** 버튼을 클릭하면 Stage 2로 이동합니다."
+                    )
+                    with gr.Row():
+                        with gr.Column(scale=1):
+                            gr.Markdown("**Identity (얼굴 이미지)**")
+                            identity_asset_dd = gr.Dropdown(
+                                choices=[_SRC_DEFAULT] + list(SAMPLE_IDENTITY.keys()),
+                                value=_SRC_DEFAULT,
+                                label="asset/identity 선택",
+                            )
+                            identity_upload = gr.Image(
+                                type="filepath",
+                                label="또는 이미지 업로드",
+                            )
+                        with gr.Column(scale=1):
+                            gr.Markdown("**Audio (립싱크 소스)**")
+                            audio_asset_dd = gr.Dropdown(
+                                choices=[_SRC_DEFAULT] + list(SAMPLE_AUDIO.keys()),
+                                value=_SRC_DEFAULT,
+                                label="asset/audio 선택",
+                            )
+                            audio_upload = gr.Audio(
+                                type="filepath",
+                                label="또는 오디오 업로드",
+                            )
+                        with gr.Column(scale=1):
+                            gr.Markdown("**Pose 영상 (머리 포즈)**")
+                            pose_asset_dd = gr.Dropdown(
+                                choices=[_SRC_DEFAULT] + list(SAMPLE_VIDEOS.keys()),
+                                value=_SRC_DEFAULT,
+                                label="asset/video 선택",
+                            )
+                            pose_upload = gr.Video(
+                                sources=["upload"],
+                                label="또는 비디오 업로드",
+                            )
+                    use_combo_btn = gr.Button(
+                        "Use This Input →", variant="primary", size="lg"
+                    )
+                    combo_status = gr.Markdown("")
+
+            # ── Stage 2: Emotions ─────────────────────────────────────
+            with gr.Tab("② Emotions", id="tab_emotion"):
                 gr.Markdown(
-                    "감정을 선택하고 오디오 샘플을 미리 들어보세요.  \n"
-                    "그 다음 **감정 음성 생성**으로 입력 목소리에 감정을 입혀 확인하고 Stage 3으로 넘어가세요."
+                    "얼굴 표정을 바꿀 **감정**을 선택하세요. 감정별 오디오 샘플을 미리 들어볼 수 있습니다."
                 )
 
                 emotion_checkboxes = gr.CheckboxGroup(
@@ -984,89 +980,13 @@ def build_gradio_app() -> gr.Blocks:
                     interactive=False,
                 )
 
-                gr.Markdown("---\n#### 감정 음성 생성 (Voice Cloning)")
-                vc_emotion_checkboxes = gr.CheckboxGroup(
-                    choices=EMOKNOB_EMOTIONS,
-                    label="음성 감정 선택 (Emoknob 지원 감정)",
-                )
-                transcription_box = gr.Textbox(
-                    label="전사된 텍스트 (자동 입력 · 편집 가능)",
-                    placeholder="Stage 1에서 영상을 설정하면 자동으로 전사됩니다...",
-                    lines=3,
-                    interactive=True,
-                )
-                emotion_strength_slider = gr.Slider(
-                    minimum=0.1,
-                    maximum=1.0,
-                    value=0.3,
-                    step=0.05,
-                    label="감정 강도 (Emotion Strength)",
-                )
-                generate_voice_btn = gr.Button(
-                    "🎙 Generate Emotional Voice", variant="primary"
-                )
-
-                gr.Markdown("##### 음성 생성 결과 미리듣기")
-                voice_result_dropdown = gr.Dropdown(
-                    choices=[],
-                    label="결과 선택 (원본 / 감정별 클론)",
-                    visible=False,
-                    interactive=True,
-                )
-                voice_result_audio = gr.Audio(
-                    label="음성 미리듣기",
-                    autoplay=False,
-                    visible=False,
-                    interactive=False,
-                )
-
                 sr_checkbox = gr.Checkbox(
                     label="Super Resolution 적용 (256 → 512, GFPGAN)",
                     value=True,
                 )
 
-                with gr.Accordion("소스 설정 (선택 사항)", open=False):
-                    gr.Markdown(
-                        "기본값은 입력 비디오에서 자동으로 추출됩니다. "
-                        "Voice Cloning을 사용하면 감정 음성이 lip sync 소스로 자동 적용됩니다."
-                    )
-                    with gr.Row():
-                        with gr.Column(scale=1):
-                            gr.Markdown("**Identity (얼굴 이미지)**")
-                            identity_asset_dd = gr.Dropdown(
-                                choices=[_SRC_DEFAULT] + list(SAMPLE_IDENTITY.keys()),
-                                value=_SRC_DEFAULT,
-                                label="asset/identity 선택",
-                            )
-                            identity_upload = gr.Image(
-                                type="filepath",
-                                label="또는 이미지 업로드",
-                            )
-                        with gr.Column(scale=1):
-                            gr.Markdown("**Pose Source (머리 포즈)**")
-                            pose_asset_dd = gr.Dropdown(
-                                choices=[_SRC_DEFAULT] + list(SAMPLE_VIDEOS.keys()),
-                                value=_SRC_DEFAULT,
-                                label="asset/video 선택",
-                            )
-                            pose_upload = gr.Video(
-                                sources=["upload"],
-                                label="또는 비디오 업로드",
-                            )
-                        with gr.Column(scale=1):
-                            gr.Markdown("**Audio Source (립싱크 — Voice Cloning 미사용 시)**")
-                            audio_asset_dd = gr.Dropdown(
-                                choices=[_SRC_DEFAULT] + list(SAMPLE_AUDIO.keys()),
-                                value=_SRC_DEFAULT,
-                                label="asset/audio 선택",
-                            )
-                            audio_upload = gr.Audio(
-                                type="filepath",
-                                label="또는 오디오 업로드",
-                            )
-
                 with gr.Row():
-                    back_to_record = gr.Button("← Back to Record")
+                    back_to_record = gr.Button("← Back to Input")
                     run_btn = gr.Button("Run Inference →", variant="primary")
 
             # ── Stage 3: Results ──────────────────────────────────────
@@ -1098,6 +1018,16 @@ def build_gradio_app() -> gr.Blocks:
 
         # ── Event wiring ─────────────────────────────────────────────
 
+        def on_input_mode_change(mode):
+            is_video = mode == "비디오로 입력"
+            return gr.update(visible=is_video), gr.update(visible=not is_video)
+
+        input_mode_radio.change(
+            on_input_mode_change,
+            inputs=[input_mode_radio],
+            outputs=[video_mode_group, combo_mode_group],
+        )
+
         btn_webcam_mode.click(
             fn=lambda: (gr.update(visible=True), gr.update(visible=False)),
             outputs=[webcam_input, upload_input],
@@ -1118,17 +1048,13 @@ def build_gradio_app() -> gr.Blocks:
             return (
                 gr.update(value="✅ 영상이 설정되었습니다. Stage 2로 이동하세요."),
                 gr.update(selected="tab_emotion"),
-                video_path,
+                {"mode": "video", "video": video_path},
             )
 
         use_video_btn.click(
             on_use_video,
             inputs=[webcam_input, upload_input],
-            outputs=[video_status, tabs, video_state],
-        ).then(
-            auto_transcribe_gradio,
-            inputs=[video_state],
-            outputs=[transcription_box, video_status],
+            outputs=[video_status, tabs, input_state],
         )
 
         if SAMPLE_VIDEOS:
@@ -1153,18 +1079,48 @@ def build_gradio_app() -> gr.Blocks:
                 return (
                     gr.update(value=f"✅ 샘플 '{name}' 설정되었습니다. Stage 2로 이동하세요."),
                     gr.update(selected="tab_emotion"),
-                    SAMPLE_VIDEOS[name],
+                    {"mode": "video", "video": SAMPLE_VIDEOS[name]},
                 )
 
             use_sample_btn.click(
                 on_use_sample,
                 inputs=[sample_dropdown],
-                outputs=[video_status, tabs, video_state],
-            ).then(
-                auto_transcribe_gradio,
-                inputs=[video_state],
-                outputs=[transcription_box, video_status],
+                outputs=[video_status, tabs, input_state],
             )
+
+        def on_use_combo(identity_dd, identity_up, audio_dd, audio_up, pose_dd, pose_up):
+            def _resolve(upload, dropdown, asset_map):
+                if upload:
+                    return upload
+                if dropdown and dropdown != _SRC_DEFAULT:
+                    return asset_map.get(dropdown)
+                return None
+
+            identity_src = _resolve(identity_up, identity_dd, SAMPLE_IDENTITY)
+            audio_src    = _resolve(audio_up, audio_dd, SAMPLE_AUDIO)
+            pose_src     = _resolve(pose_up, pose_dd, SAMPLE_VIDEOS)
+
+            if not (identity_src and audio_src and pose_src):
+                return (
+                    gr.update(value="⚠️ Identity 이미지, Audio, Pose 영상을 모두 설정해주세요."),
+                    gr.update(),
+                    None,
+                )
+            return (
+                gr.update(value="✅ 입력이 설정되었습니다. Stage 2로 이동하세요."),
+                gr.update(selected="tab_emotion"),
+                {"mode": "combo", "identity": identity_src, "audio": audio_src, "pose": pose_src},
+            )
+
+        use_combo_btn.click(
+            on_use_combo,
+            inputs=[
+                identity_asset_dd, identity_upload,
+                audio_asset_dd, audio_upload,
+                pose_asset_dd, pose_upload,
+            ],
+            outputs=[combo_status, tabs, input_state],
+        )
 
         def on_emotion_change(selected):
             if not selected:
@@ -1175,29 +1131,6 @@ def build_gradio_app() -> gr.Blocks:
             on_emotion_change,
             inputs=[emotion_checkboxes],
             outputs=[selected_summary],
-        )
-
-        generate_voice_btn.click(
-            fn=generate_voice_gradio,
-            inputs=[
-                video_state, transcription_box,
-                vc_emotion_checkboxes, emotion_strength_slider,
-            ],
-            outputs=[
-                voice_result_dropdown, voice_result_audio,
-                voice_results_state, voice_display_state,
-            ],
-        )
-
-        def on_voice_result_change(selected, display_map):
-            if not selected or not display_map or selected not in display_map:
-                return gr.update()
-            return gr.update(value=display_map[selected])
-
-        voice_result_dropdown.change(
-            on_voice_result_change,
-            inputs=[voice_result_dropdown, voice_display_state],
-            outputs=[voice_result_audio],
         )
 
         def on_emotion_preview_change(display_name):
@@ -1263,13 +1196,7 @@ def build_gradio_app() -> gr.Blocks:
             outputs=[tabs, status_md, result_video, comparison_video, result_selector, multi_comparison_video],
         ).then(
             fn=run_inference_gradio,
-            inputs=[
-                video_state, emotion_checkboxes, sr_checkbox,
-                identity_asset_dd, identity_upload,
-                pose_asset_dd, pose_upload,
-                audio_asset_dd, audio_upload,
-                voice_results_state,
-            ],
+            inputs=[input_state, emotion_checkboxes, sr_checkbox],
             outputs=[result_video, comparison_video, result_selector, results_state, multi_comparison_video],
         ).then(
             fn=lambda: "✅ 추론 완료! 아래에서 결과를 확인하세요.",
