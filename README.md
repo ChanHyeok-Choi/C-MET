@@ -156,7 +156,7 @@ Here are some examples:
 ##  🎬 Data Preprocess for Training
 <details> <summary> Data Preprocess for Training </summary>
 
-**Note**: Please follow the [EDTalk preprocess](https://github.com/tanshuai0219/EDTalk?tab=readme-ov-file#-data-preprocess-for-training). After preprocessing, please run `python prep_video.py --root ./dataset/MEAD/FPS25` to extract EDTalk facial expression features.
+**Note**: Please follow the [EDTalk preprocess](https://github.com/tanshuai0219/EDTalk?tab=readme-ov-file#-data-preprocess-for-training). After preprocessing, please run `python prep_video.py --root ./dataset/MEAD/FPS25` to extract EDTalk facial expression features. We test all models based on [./dataset/MEAD/test.csv](./dataset/MEAD/test.csv) and [./dataset/CREMA_D/test.csv](./dataset/CREMA_D/test.csv).
 
 - Download the MEAD and CREMA-D dataset:
 
