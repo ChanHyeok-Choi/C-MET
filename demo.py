@@ -6,6 +6,39 @@ import shutil
 # MPS 미지원 연산(torch.qr 등)을 CPU로 자동 폴백 — torch import 전에 설정해야 적용됨
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
+
+def _patch_gradio_client():
+    """
+    gradio_client 1.3.x 버그 패치: JSON Schema에서 additionalProperties가
+    불리언(true/false)일 때 get_type()과 _json_schema_to_python_type()이
+    TypeError/AttributeError를 발생시키는 문제를 수정합니다.
+    """
+    try:
+        import gradio_client.utils as _u
+
+        _orig_get_type = _u.get_type
+
+        def _get_type(schema):
+            if not isinstance(schema, dict):
+                return {}
+            return _orig_get_type(schema)
+
+        _u.get_type = _get_type
+
+        _orig_convert = _u._json_schema_to_python_type
+
+        def _json_schema_to_python_type(schema, defs):
+            if isinstance(schema, bool):
+                return "Any"
+            return _orig_convert(schema, defs)
+
+        _u._json_schema_to_python_type = _json_schema_to_python_type
+    except Exception:
+        pass
+
+
+_patch_gradio_client()
+
 sys.path.append('src')
 
 import cv2

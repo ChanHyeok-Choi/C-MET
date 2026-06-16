@@ -195,7 +195,7 @@ def main():
 
     if args.opt == 'A':
         src_aud_path = args.audio_driving_path
-        audio, audio_bs, audio_T = audio_preprocessing(src_aud_path)
+        audio, audio_bs, audio_T = audio_preprocessing(src_aud_path, device=device)
         lip_vid_target = audio2lip(audio, audio_bs, audio_T)[0]
         lip_vid_target = conv_feat(lip_vid_target, k_size=3, sigma=1) # torch.Size([372, 500])
         lip_vid_target = lip_vid_target.to(device)
