@@ -69,6 +69,7 @@ from src.EDTalk.networks.utils import check_package_installed
 # ---------------------------------------------------------------------------
 
 EMOTIONS = [
+    ("neutral",     "MEAD",   "audios/MEAD/neutral/emotion2vec+large_features"),
     ("angry",       "MEAD",   "audios/MEAD/angry/emotion2vec+large_features"),
     ("contempt",    "MEAD",   "audios/MEAD/contempt/emotion2vec+large_features"),
     ("disgusted",   "MEAD",   "audios/MEAD/disgusted/emotion2vec+large_features"),
@@ -544,17 +545,19 @@ def create_comparison_video(input_video: str, result_video: str, emotion_name: s
     return comparison_path
 
 
-def create_multi_comparison_video(
-    input_video: str,
-    result_paths: list,
-    emotion_names: list,
-) -> str:
-    """Horizontal N+1 panel: Input | emotion1 | emotion2 | ..."""
-    save_path = "res/demo_multi_comparison.mp4"
+def build_running_merge(entries: list) -> str:
+    """Horizontal panel of every result generated so far this session.
+
+    entries: [{"label": str, "sr_path": str}, ...] in generation order.
+    No Input panel — durations/identities can differ across separate Run
+    clicks, so there's no single coherent "input" to anchor it to. Always
+    rebuilt from scratch and written to a fixed path.
+    """
+    save_path = "res/demo_running_merge.mp4"
     tmp_path  = save_path + ".tmp.mp4"
 
-    caps   = [cv2.VideoCapture(input_video)] + [cv2.VideoCapture(p) for p in result_paths]
-    labels = ["Input Video"] + list(emotion_names)
+    caps   = [cv2.VideoCapture(e["sr_path"]) for e in entries]
+    labels = [e["label"] for e in entries]
 
     frames = []
     while True:
@@ -568,7 +571,7 @@ def create_multi_comparison_video(
         if not panel_frames:
             break
 
-        h_ref, w_ref = panel_frames[1].shape[:2]
+        h_ref, w_ref = panel_frames[0].shape[:2]
         resized = [cv2.resize(f, (w_ref, h_ref)) for f in panel_frames]
 
         font      = cv2.FONT_HERSHEY_DUPLEX
@@ -590,11 +593,11 @@ def create_multi_comparison_video(
         cap.release()
 
     if not frames:
-        return result_paths[0]
+        return entries[0]["sr_path"]
 
     os.makedirs("res", exist_ok=True)
     imageio.mimsave(tmp_path, frames, fps=float(25))
-    audio_clip = AudioFileClip(result_paths[0])
+    audio_clip = AudioFileClip(entries[0]["sr_path"])
     video_clip = VideoFileClip(tmp_path)
     video_clip.set_audio(audio_clip).write_videofile(
         save_path, codec="libx264", audio_codec="aac", logger=None
@@ -663,6 +666,13 @@ def run_single_inference(
     _pose_src = pose_video or cropped_video
     pose_vid_target, fps = vid_preprocessing(_pose_src)
     pose_vid_target = pose_vid_target.to(device)
+    # Ping-pong pad if the pose clip is shorter than the audio-driven length
+    # (e.g. combo mode lets pose/audio durations differ independently) —
+    # otherwise indexing below would clamp to the last frame and freeze.
+    while pose_vid_target.shape[1] < lip_len:
+        pose_vid_target = torch.cat(
+            [pose_vid_target, torch.flip(pose_vid_target, dims=[1])], dim=1
+        )
     len_pose = pose_vid_target.shape[1]
 
     src_vid_target, _ = vid_preprocessing(cropped_video)
@@ -760,17 +770,56 @@ def _preprocess_combo_input(input_state: dict, tmp_dir: str):
     return identity_img, input_state["audio"], identity_pseudo, pose_cropped
 
 
-def run_inference_gradio(
-    input_state,
-    selected_display_names,
-    use_sr: bool = True,
+def _resolve_asset(upload, dropdown, asset_map):
+    if upload:
+        return upload
+    if dropdown and dropdown != _SRC_DEFAULT:
+        return asset_map.get(dropdown)
+    return None
+
+
+def resolve_input_state(
+    mode, webcam_path, upload_path, sample_name,
+    identity_dd, identity_up, audio_dd, audio_up, pose_dd, pose_up,
+) -> dict:
+    """Resolve the currently-visible input widgets into an input_state dict.
+
+    Raises gr.Error with a Korean message if the active mode's required
+    pieces aren't all present — called fresh on every Run click instead of
+    via a separate staging step.
+    """
+    if mode == "비디오로 입력":
+        video_path = webcam_path or upload_path or (
+            SAMPLE_VIDEOS.get(sample_name) if sample_name else None
+        )
+        if not video_path:
+            raise gr.Error("영상을 촬영, 업로드, 또는 샘플에서 선택해주세요.")
+        return {"mode": "video", "video": video_path}
+
+    identity_src = _resolve_asset(identity_up, identity_dd, SAMPLE_IDENTITY)
+    audio_src    = _resolve_asset(audio_up, audio_dd, SAMPLE_AUDIO)
+    pose_src     = _resolve_asset(pose_up, pose_dd, SAMPLE_VIDEOS)
+    if not (identity_src and audio_src and pose_src):
+        raise gr.Error("Identity 이미지, Audio, Pose 영상을 모두 설정해주세요.")
+    return {"mode": "combo", "identity": identity_src, "audio": audio_src, "pose": pose_src}
+
+
+def run_inference_single_page(
+    mode, webcam_path, upload_path, sample_name,
+    identity_dd, identity_up, audio_dd, audio_up, pose_dd, pose_up,
+    selected_display_names, use_sr: bool,
+    results_so_far: list,
     progress=gr.Progress(track_tqdm=True),
 ):
-    """Preprocess once, then run inference per selected emotion. Returns first result."""
-    if not input_state:
-        raise gr.Error("Stage 1에서 입력을 먼저 설정해주세요.")
+    """Resolve input, run inference per selected emotion, and append the new
+    results onto results_so_far (never replacing earlier Run clicks' results)."""
     if not selected_display_names:
         raise gr.Error("감정을 하나 이상 선택해주세요.")
+
+    input_state = resolve_input_state(
+        mode, webcam_path, upload_path, sample_name,
+        identity_dd, identity_up, audio_dd, audio_up, pose_dd, pose_up,
+    )
 
     os.makedirs("res", exist_ok=True)
     progress(0, desc="전처리 중...")
@@ -786,7 +835,8 @@ def run_inference_gradio(
     except RuntimeError as e:
         raise gr.Error(f"전처리 실패: {e}")
 
-    results = {}  # display_name -> (sr_path, comparison_path)
+    base_idx = len(results_so_far)
+    new_entries = []
     total = len(selected_display_names)
 
     try:
@@ -796,8 +846,11 @@ def run_inference_gradio(
                 desc=f"{display_name} 추론 중... ({i + 1}/{total})",
             )
             _, _, emo_e2v_path = EMOTION_DISPLAY_MAP[display_name]
+            run_idx = base_idx + i
             safe = display_name.replace(" ", "_").replace("[", "").replace("]", "")
-            save_path = f"res/demo_{safe}.mp4"
+            # run_idx keeps filenames unique across separate Run clicks so an
+            # earlier stacked block's video file is never silently overwritten.
+            save_path = f"res/demo_{run_idx:03d}_{safe}.mp4"
 
             sr_path, comparison_path = run_single_inference(
                 identity_img, audio_src, cropped_video, emo_e2v_path, save_path,
@@ -805,31 +858,23 @@ def run_inference_gradio(
                 use_sr=use_sr,
                 pose_video=pose_src,
             )
-            results[display_name] = (sr_path, comparison_path)
-
-        if len(results) > 1:
-            sr_paths = [results[n][0] for n in selected_display_names]
-            combined_cmp = create_multi_comparison_video(
-                cropped_video, sr_paths, selected_display_names
-            )
-        else:
-            combined_cmp = results[selected_display_names[0]][1]
+            new_entries.append({
+                "label": f"#{run_idx + 1} · {display_name}",
+                "sr_path": sr_path,
+                "comparison_path": comparison_path,
+            })
     finally:
         shutil.rmtree(TMP_DIR, ignore_errors=True)
 
+    progress(0.9, desc="전체 결과 병합 중...")
+    updated_results = results_so_far + new_entries
+    merged_path = build_running_merge(updated_results)
     progress(1.0, desc="완료!")
 
-    first_display = selected_display_names[0]
-    first_sr, first_cmp = results[first_display]
-    choices = list(results.keys())
-    multi = len(choices) > 1
-
     return (
-        gr.update(value=first_sr, visible=True),
-        gr.update(value=first_cmp, visible=True),
-        gr.update(choices=choices, value=first_display, visible=multi),
-        results,
-        gr.update(value=combined_cmp, visible=multi),
+        updated_results,
+        gr.update(value=merged_path, visible=True),
+        "✅ 추론 완료! 아래에서 결과를 확인하세요.",
     )
 
 
@@ -841,180 +886,166 @@ def build_gradio_app() -> gr.Blocks:
     with gr.Blocks(title="C-MET Demo", theme=gr.themes.Soft()) as app:
         gr.Markdown(
             "# C-MET — Cross-Modal Emotion Transfer\n"
-            "웹캠으로 영상을 촬영하고, 원하는 감정이 담긴 토킹 페이스 영상을 생성합니다."
+            "입력을 설정하고 감정을 선택한 뒤 **Run Inference**를 누르면, "
+            "결과가 아래에 계속 쌓이고 맨 아래에는 지금까지 생성된 모든 결과가 나란히 합쳐져 보입니다."
         )
 
-        # Shared state
-        input_state   = gr.State(None)  # {"mode": "video", "video": p} | {"mode": "combo", "identity": p, "audio": p, "pose": p}
-        results_state = gr.State({})
+        # Accumulates across every Run click this session: [{"label", "sr_path", "comparison_path"}, ...]
+        results_list_state = gr.State([])
 
-        with gr.Tabs() as tabs:
+        # ── Input ──────────────────────────────────────────────────────
+        input_mode_radio = gr.Radio(
+            choices=["비디오로 입력", "Identity + Audio + Pose 조합"],
+            value="비디오로 입력",
+            label="입력 방식",
+        )
 
-            # ── Stage 1: Input ─────────────────────────────────────────
-            with gr.Tab("① Input", id="tab_record"):
-                input_mode_radio = gr.Radio(
-                    choices=["비디오로 입력", "Identity + Audio + Pose 조합"],
-                    value="비디오로 입력",
-                    label="입력 방식",
+        with gr.Group(visible=True) as video_mode_group:
+            gr.Markdown("**웹캠 촬영** 또는 **비디오 파일 업로드** 중 하나를 선택하세요.")
+            with gr.Row():
+                btn_webcam_mode = gr.Button(
+                    "📷 웹캠으로 촬영", variant="secondary", size="sm"
+                )
+                btn_upload_mode = gr.Button(
+                    "📁 비디오 파일 업로드", variant="primary", size="sm"
+                )
+            webcam_input = gr.Video(
+                sources=["webcam"],
+                include_audio=True,
+                label="웹캠 촬영",
+                height=400,
+                visible=False,
+            )
+            upload_input = gr.Video(
+                sources=["upload"],
+                label="비디오 파일 업로드",
+                height=400,
+                visible=True,
+            )
+
+            if SAMPLE_VIDEOS:
+                gr.Markdown("---\n#### 또는 샘플 비디오 사용")
+                sample_dropdown = gr.Dropdown(
+                    choices=[_SRC_DEFAULT] + list(SAMPLE_VIDEOS.keys()),
+                    value=_SRC_DEFAULT,
+                    label="샘플 영상 선택",
+                )
+                sample_preview = gr.Video(
+                    label="샘플 미리보기",
+                    interactive=False,
+                    visible=False,
+                    height=300,
                 )
 
-                with gr.Group(visible=True) as video_mode_group:
-                    gr.Markdown(
-                        "**웹캠 촬영** 또는 **비디오 파일 업로드** 중 하나를 선택하세요.\n\n"
-                        "입력 완료 후 **Use This Video →** 버튼을 클릭하면 Stage 2로 이동합니다."
+        with gr.Group(visible=False) as combo_mode_group:
+            gr.Markdown("**Identity 이미지**, **Audio**, **Pose 영상**을 각각 설정하세요.")
+            with gr.Row():
+                with gr.Column(scale=1):
+                    gr.Markdown("**Identity (얼굴 이미지)**")
+                    identity_asset_dd = gr.Dropdown(
+                        choices=[_SRC_DEFAULT] + list(SAMPLE_IDENTITY.keys()),
+                        value=_SRC_DEFAULT,
+                        label="asset/identity 선택",
                     )
-                    with gr.Row():
-                        btn_webcam_mode = gr.Button(
-                            "📷 웹캠으로 촬영", variant="secondary", size="sm"
-                        )
-                        btn_upload_mode = gr.Button(
-                            "📁 비디오 파일 업로드", variant="primary", size="sm"
-                        )
-                    webcam_input = gr.Video(
-                        sources=["webcam"],
-                        include_audio=True,
-                        label="웹캠 촬영",
-                        height=400,
+                    identity_asset_preview = gr.Image(
+                        label="샘플 미리보기",
+                        interactive=False,
+                        visible=False,
+                        height=200,
+                    )
+                    identity_upload = gr.Image(
+                        type="filepath",
+                        label="또는 이미지 업로드",
+                    )
+                with gr.Column(scale=1):
+                    gr.Markdown("**Audio (립싱크 소스)**")
+                    audio_asset_dd = gr.Dropdown(
+                        choices=[_SRC_DEFAULT] + list(SAMPLE_AUDIO.keys()),
+                        value=_SRC_DEFAULT,
+                        label="asset/audio 선택",
+                    )
+                    audio_asset_preview = gr.Audio(
+                        label="샘플 미리보기",
+                        interactive=False,
                         visible=False,
                     )
-                    upload_input = gr.Video(
+                    audio_upload = gr.Audio(
+                        type="filepath",
+                        label="또는 오디오 업로드",
+                    )
+                with gr.Column(scale=1):
+                    gr.Markdown("**Pose 영상 (머리 포즈)**")
+                    pose_asset_dd = gr.Dropdown(
+                        choices=[_SRC_DEFAULT] + list(SAMPLE_VIDEOS.keys()),
+                        value=_SRC_DEFAULT,
+                        label="asset/video 선택",
+                    )
+                    pose_asset_preview = gr.Video(
+                        label="샘플 미리보기",
+                        interactive=False,
+                        visible=False,
+                        height=200,
+                    )
+                    pose_upload = gr.Video(
                         sources=["upload"],
-                        label="비디오 파일 업로드",
-                        height=400,
-                        visible=True,
+                        label="또는 비디오 업로드",
                     )
-                    use_video_btn = gr.Button(
-                        "Use This Video →", variant="primary", size="lg"
-                    )
-                    video_status = gr.Markdown("")
 
-                    if SAMPLE_VIDEOS:
-                        gr.Markdown("---\n#### 또는 샘플 비디오 사용")
-                        sample_dropdown = gr.Dropdown(
-                            choices=list(SAMPLE_VIDEOS.keys()),
-                            label="샘플 영상 선택",
-                            value=None,
-                        )
-                        sample_preview = gr.Video(
-                            label="샘플 미리보기",
-                            interactive=False,
-                            visible=False,
-                            height=300,
-                        )
-                        use_sample_btn = gr.Button(
-                            "샘플 비디오 사용 →", variant="secondary", size="lg"
-                        )
+        # ── Emotions ──────────────────────────────────────────────────
+        gr.Markdown("---\n## 감정 선택")
+        emotion_checkboxes = gr.CheckboxGroup(
+            choices=EMOTION_DISPLAY_NAMES,
+            label="얼굴 표정을 바꿀 감정 (중복 가능)",
+        )
+        selected_summary = gr.Markdown("선택된 감정: **없음**")
 
-                with gr.Group(visible=False) as combo_mode_group:
-                    gr.Markdown(
-                        "**Identity 이미지**, **Audio**, **Pose 영상**을 각각 설정하세요.\n\n"
-                        "모두 설정 후 **Use This Input →** 버튼을 클릭하면 Stage 2로 이동합니다."
-                    )
-                    with gr.Row():
-                        with gr.Column(scale=1):
-                            gr.Markdown("**Identity (얼굴 이미지)**")
-                            identity_asset_dd = gr.Dropdown(
-                                choices=[_SRC_DEFAULT] + list(SAMPLE_IDENTITY.keys()),
-                                value=_SRC_DEFAULT,
-                                label="asset/identity 선택",
-                            )
-                            identity_upload = gr.Image(
-                                type="filepath",
-                                label="또는 이미지 업로드",
-                            )
-                        with gr.Column(scale=1):
-                            gr.Markdown("**Audio (립싱크 소스)**")
-                            audio_asset_dd = gr.Dropdown(
-                                choices=[_SRC_DEFAULT] + list(SAMPLE_AUDIO.keys()),
-                                value=_SRC_DEFAULT,
-                                label="asset/audio 선택",
-                            )
-                            audio_upload = gr.Audio(
-                                type="filepath",
-                                label="또는 오디오 업로드",
-                            )
-                        with gr.Column(scale=1):
-                            gr.Markdown("**Pose 영상 (머리 포즈)**")
-                            pose_asset_dd = gr.Dropdown(
-                                choices=[_SRC_DEFAULT] + list(SAMPLE_VIDEOS.keys()),
-                                value=_SRC_DEFAULT,
-                                label="asset/video 선택",
-                            )
-                            pose_upload = gr.Video(
-                                sources=["upload"],
-                                label="또는 비디오 업로드",
-                            )
-                    use_combo_btn = gr.Button(
-                        "Use This Input →", variant="primary", size="lg"
-                    )
-                    combo_status = gr.Markdown("")
+        with gr.Accordion("오디오 샘플 미리듣기", open=False):
+            preview_dropdown = gr.Dropdown(
+                choices=EMOTION_DISPLAY_NAMES,
+                label="미리들을 감정",
+            )
+            sample_choice_dropdown = gr.Dropdown(
+                choices=[],
+                label="샘플 선택",
+                visible=False,
+                interactive=True,
+            )
+            preview_btn = gr.Button("▶ Play", visible=False)
+            audio_preview = gr.Audio(
+                label="Emotion Sample",
+                autoplay=True,
+                visible=False,
+                interactive=False,
+            )
 
-            # ── Stage 2: Emotions ─────────────────────────────────────
-            with gr.Tab("② Emotions", id="tab_emotion"):
-                gr.Markdown(
-                    "얼굴 표정을 바꿀 **감정**을 선택하세요. 감정별 오디오 샘플을 미리 들어볼 수 있습니다."
-                )
+        sr_checkbox = gr.Checkbox(
+            label="Super Resolution 적용 (256 → 512, GFPGAN)",
+            value=True,
+        )
 
-                emotion_checkboxes = gr.CheckboxGroup(
-                    choices=EMOTION_DISPLAY_NAMES,
-                    label="감정 선택 (중복 가능)",
-                )
-                selected_summary = gr.Markdown("선택된 감정: **없음**")
+        run_btn = gr.Button("Run Inference ↓", variant="primary", size="lg")
+        status_md = gr.Markdown("")
 
-                gr.Markdown("---\n#### 오디오 샘플 미리듣기")
-                preview_dropdown = gr.Dropdown(
-                    choices=EMOTION_DISPLAY_NAMES,
-                    label="미리들을 감정",
-                )
-                sample_choice_dropdown = gr.Dropdown(
-                    choices=[],
-                    label="샘플 선택",
-                    visible=False,
-                    interactive=True,
-                )
-                preview_btn = gr.Button("▶ Play", visible=False)
-                audio_preview = gr.Audio(
-                    label="Emotion Sample",
-                    autoplay=True,
-                    visible=False,
-                    interactive=False,
-                )
+        # ── Stacked results (grows on every Run click) ──────────────────
+        gr.Markdown("---\n## 생성 결과")
 
-                sr_checkbox = gr.Checkbox(
-                    label="Super Resolution 적용 (256 → 512, GFPGAN)",
-                    value=True,
-                )
-
+        @gr.render(inputs=[results_list_state])
+        def render_results(results):
+            if not results:
+                gr.Markdown("_아직 생성된 결과가 없습니다._")
+                return
+            for entry in results:
+                gr.Markdown(f"#### {entry['label']}")
                 with gr.Row():
-                    back_to_record = gr.Button("← Back to Input")
-                    run_btn = gr.Button("Run Inference →", variant="primary")
+                    gr.Video(value=entry["sr_path"], label="생성 결과 (SR 적용)", height=300)
+                    gr.Video(value=entry["comparison_path"], label="Input vs 결과", height=300)
 
-            # ── Stage 3: Results ──────────────────────────────────────
-            with gr.Tab("③ Results", id="tab_result"):
-                status_md = gr.Markdown(
-                    "추론이 완료되면 결과가 여기에 표시됩니다."
-                )
-                result_selector = gr.Dropdown(
-                    choices=[], label="결과 선택 (감정)", visible=False
-                )
-                result_video = gr.Video(
-                    label="생성 결과 (SR 적용)",
-                    visible=False,
-                    height=400,
-                )
-                gr.Markdown("---\n#### 입력 vs 결과 비교")
-                comparison_video = gr.Video(
-                    label="비교 영상 (Input | 결과)",
-                    visible=False,
-                    height=400,
-                )
-                gr.Markdown("---\n#### 전체 감정 비교 (Input | emotion1 | emotion2 | ...)")
-                multi_comparison_video = gr.Video(
-                    label="전체 감정 비교 영상",
-                    visible=False,
-                    height=400,
-                )
-                back_to_emotion = gr.Button("← Select More Emotions")
+        gr.Markdown("---\n## 전체 병합 (지금까지 생성된 모든 결과, 새로고침 전까지 누적)")
+        running_merge_video = gr.Video(
+            label="전체 병합 영상",
+            visible=False,
+            height=400,
+        )
 
         # ── Event wiring ─────────────────────────────────────────────
 
@@ -1037,29 +1068,9 @@ def build_gradio_app() -> gr.Blocks:
             outputs=[webcam_input, upload_input],
         )
 
-        def on_use_video(webcam_path, upload_path):
-            video_path = webcam_path or upload_path
-            if video_path is None:
-                return (
-                    gr.update(value="⚠️ 먼저 영상을 촬영하거나 업로드해주세요."),
-                    gr.update(),
-                    None,
-                )
-            return (
-                gr.update(value="✅ 영상이 설정되었습니다. Stage 2로 이동하세요."),
-                gr.update(selected="tab_emotion"),
-                {"mode": "video", "video": video_path},
-            )
-
-        use_video_btn.click(
-            on_use_video,
-            inputs=[webcam_input, upload_input],
-            outputs=[video_status, tabs, input_state],
-        )
-
         if SAMPLE_VIDEOS:
             def on_sample_select(name):
-                if not name:
+                if not name or name == _SRC_DEFAULT:
                     return gr.update(visible=False)
                 return gr.update(value=SAMPLE_VIDEOS[name], visible=True)
 
@@ -1068,58 +1079,28 @@ def build_gradio_app() -> gr.Blocks:
                 inputs=[sample_dropdown],
                 outputs=[sample_preview],
             )
+        else:
+            sample_dropdown = gr.State(None)
 
-            def on_use_sample(name):
-                if not name:
-                    return (
-                        gr.update(value="⚠️ 샘플 영상을 선택해주세요."),
-                        gr.update(),
-                        None,
-                    )
-                return (
-                    gr.update(value=f"✅ 샘플 '{name}' 설정되었습니다. Stage 2로 이동하세요."),
-                    gr.update(selected="tab_emotion"),
-                    {"mode": "video", "video": SAMPLE_VIDEOS[name]},
-                )
+        def on_asset_preview_change(name, asset_map):
+            if not name or name == _SRC_DEFAULT:
+                return gr.update(value=None, visible=False)
+            return gr.update(value=asset_map.get(name), visible=True)
 
-            use_sample_btn.click(
-                on_use_sample,
-                inputs=[sample_dropdown],
-                outputs=[video_status, tabs, input_state],
-            )
-
-        def on_use_combo(identity_dd, identity_up, audio_dd, audio_up, pose_dd, pose_up):
-            def _resolve(upload, dropdown, asset_map):
-                if upload:
-                    return upload
-                if dropdown and dropdown != _SRC_DEFAULT:
-                    return asset_map.get(dropdown)
-                return None
-
-            identity_src = _resolve(identity_up, identity_dd, SAMPLE_IDENTITY)
-            audio_src    = _resolve(audio_up, audio_dd, SAMPLE_AUDIO)
-            pose_src     = _resolve(pose_up, pose_dd, SAMPLE_VIDEOS)
-
-            if not (identity_src and audio_src and pose_src):
-                return (
-                    gr.update(value="⚠️ Identity 이미지, Audio, Pose 영상을 모두 설정해주세요."),
-                    gr.update(),
-                    None,
-                )
-            return (
-                gr.update(value="✅ 입력이 설정되었습니다. Stage 2로 이동하세요."),
-                gr.update(selected="tab_emotion"),
-                {"mode": "combo", "identity": identity_src, "audio": audio_src, "pose": pose_src},
-            )
-
-        use_combo_btn.click(
-            on_use_combo,
-            inputs=[
-                identity_asset_dd, identity_upload,
-                audio_asset_dd, audio_upload,
-                pose_asset_dd, pose_upload,
-            ],
-            outputs=[combo_status, tabs, input_state],
+        identity_asset_dd.change(
+            lambda name: on_asset_preview_change(name, SAMPLE_IDENTITY),
+            inputs=[identity_asset_dd],
+            outputs=[identity_asset_preview],
+        )
+        audio_asset_dd.change(
+            lambda name: on_asset_preview_change(name, SAMPLE_AUDIO),
+            inputs=[audio_asset_dd],
+            outputs=[audio_asset_preview],
+        )
+        pose_asset_dd.change(
+            lambda name: on_asset_preview_change(name, SAMPLE_VIDEOS),
+            inputs=[pose_asset_dd],
+            outputs=[pose_asset_preview],
         )
 
         def on_emotion_change(selected):
@@ -1173,50 +1154,22 @@ def build_gradio_app() -> gr.Blocks:
             outputs=[audio_preview],
         )
 
-        back_to_record.click(
-            lambda: gr.update(selected="tab_record"),
-            outputs=[tabs],
-        )
-
-        back_to_emotion.click(
-            lambda: gr.update(selected="tab_emotion"),
-            outputs=[tabs],
-        )
-
-        # Run inference: immediately switch tab + update status, then infer
+        # Run inference: append new results onto results_list_state and
+        # rebuild the running merge video. Never replaces earlier results.
         run_btn.click(
-            fn=lambda: (
-                gr.update(selected="tab_result"),
-                "⏳ 추론 중입니다. 잠시 기다려주세요...",
-                gr.update(visible=False),
-                gr.update(visible=False),
-                gr.update(visible=False),
-                gr.update(visible=False),
-            ),
-            outputs=[tabs, status_md, result_video, comparison_video, result_selector, multi_comparison_video],
-        ).then(
-            fn=run_inference_gradio,
-            inputs=[input_state, emotion_checkboxes, sr_checkbox],
-            outputs=[result_video, comparison_video, result_selector, results_state, multi_comparison_video],
-        ).then(
-            fn=lambda: "✅ 추론 완료! 아래에서 결과를 확인하세요.",
+            fn=lambda: "⏳ 추론 중입니다. 잠시 기다려주세요...",
             outputs=[status_md],
-        )
-
-        # Switch both videos when dropdown changes
-        def on_selector_change(name, res):
-            print(f"[DEBUG] on_selector_change: name={name!r}, res_keys={list(res.keys()) if res else 'EMPTY'}")
-            if not name or name not in res:
-                print(f"[DEBUG] early return — name_in_res={name in res if res else False}")
-                return gr.update(), gr.update()
-            sr_path, cmp_path = res[name]
-            print(f"[DEBUG] returning sr={sr_path!r}, cmp={cmp_path!r}")
-            return gr.update(value=sr_path), gr.update(value=cmp_path)
-
-        result_selector.change(
-            fn=on_selector_change,
-            inputs=[result_selector, results_state],
-            outputs=[result_video, comparison_video],
+        ).then(
+            fn=run_inference_single_page,
+            inputs=[
+                input_mode_radio, webcam_input, upload_input, sample_dropdown,
+                identity_asset_dd, identity_upload,
+                audio_asset_dd, audio_upload,
+                pose_asset_dd, pose_upload,
+                emotion_checkboxes, sr_checkbox,
+                results_list_state,
+            ],
+            outputs=[results_list_state, running_merge_video, status_md],
         )
 
     return app
