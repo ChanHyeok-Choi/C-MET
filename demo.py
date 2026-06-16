@@ -493,20 +493,49 @@ def apply_super_resolution(video_path: str) -> str:
     return out_path
 
 
+def _pingpong_index(i: int, n: int) -> int:
+    """Bounce 0,1,...,n-1,n-2,...,1,0,1,... — used to keep a shorter panel
+    moving instead of freezing once it runs out of real frames."""
+    if n <= 1:
+        return 0
+    period = 2 * (n - 1)
+    pos = i % period
+    return pos if pos < n else period - pos
+
+
 def create_comparison_video(input_video: str, result_video: str, emotion_name: str) -> str:
-    """Create side-by-side comparison: input (left) | result (right) with text labels."""
+    """Create side-by-side comparison: input (left) | result (right) with text labels.
+
+    result_video (audio-driven) determines the output length. If input_video
+    is shorter (e.g. combo mode's identity pseudo-video is only ~2s), its
+    frames are ping-ponged instead of truncating the whole comparison to the
+    shorter clip and silently freezing the panel while audio keeps playing.
+    """
     comparison_path = result_video.replace(".mp4", "_comparison.mp4")
     tmp_path = comparison_path + ".tmp.mp4"
 
-    cap_in  = cv2.VideoCapture(input_video)
+    cap_in = cv2.VideoCapture(input_video)
+    in_frames = []
+    while True:
+        ret_in, frame_in = cap_in.read()
+        if not ret_in:
+            break
+        in_frames.append(frame_in)
+    cap_in.release()
+
+    if not in_frames:
+        return result_video
+
     cap_out = cv2.VideoCapture(result_video)
 
     frames = []
+    i = 0
     while True:
-        ret_in,  frame_in  = cap_in.read()
         ret_out, frame_out = cap_out.read()
-        if not ret_in or not ret_out:
+        if not ret_out:
             break
+        frame_in = in_frames[_pingpong_index(i, len(in_frames))]
+        i += 1
 
         h, w = frame_out.shape[:2]
         frame_in = cv2.resize(frame_in, (w, h))
@@ -529,7 +558,6 @@ def create_comparison_video(input_video: str, result_video: str, emotion_name: s
         )
         frames.append(combined)
 
-    cap_in.release()
     cap_out.release()
 
     if not frames:
