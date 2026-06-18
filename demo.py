@@ -93,6 +93,7 @@ PRETRAINED_WEIGHT_FILES = ["Audio2Lip.pt", "EDTalk.pt", "EDTalk-V.pt"]
 HF_CHECKPOINT_FILENAME = "checkpoints/_epoch_2105_checkpoint_step000200000.pth"
 
 TMP_DIR = "tmp_demo"
+TMP_CUSTOM_DIR = "tmp_custom"
 
 SAMPLE_VIDEO_DIR = "asset/video"
 SAMPLE_VIDEOS = {
@@ -634,22 +635,20 @@ def build_running_merge(entries: list) -> str:
     return save_path
 
 
-def load_e2v_direction(neu_path: str, emo_path: str, num_samples: int = 10):
+def load_e2v_direction(neu_path: str, emo_paths: list, num_samples: int = 10):
     neu_files = [
         os.path.join(neu_path, f) for f in os.listdir(neu_path) if f.endswith(".npy")
     ]
-    emo_files = [
-        os.path.join(emo_path, f) for f in os.listdir(emo_path) if f.endswith(".npy")
-    ]
+    emo_files = []
+    for emo_path in emo_paths:
+        if os.path.isdir(emo_path):
+            emo_files.extend([
+                os.path.join(emo_path, f) for f in os.listdir(emo_path) if f.endswith(".npy")
+            ])
 
-    if len(neu_files) < num_samples:
-        raise RuntimeError(
-            f"Not enough neutral e2v files (need {num_samples}, got {len(neu_files)})"
-        )
-    if len(emo_files) < num_samples:
-        raise RuntimeError(
-            f"Not enough emotion e2v files (need {num_samples}, got {len(emo_files)})"
-        )
+    num_samples = min(num_samples, len(neu_files), len(emo_files))
+    if num_samples == 0:
+        raise RuntimeError("감정 또는 neutral .npy 파일이 없습니다.")
 
     neu = torch.stack(
         [torch.from_numpy(np.load(f)).float() for f in random.sample(neu_files, num_samples)]
@@ -668,7 +667,7 @@ def run_single_inference(
     identity_img: str,
     audio_wav: str,
     cropped_video: str,
-    emo_e2v_path: str,
+    emo_e2v_paths: list,
     save_path: str,
     emotion_name: str = "",
     use_sr: bool = True,
@@ -681,7 +680,7 @@ def run_single_inference(
     gen           = _MODELS["gen"]
     connector_exp = _MODELS["connector_exp"]
 
-    e2v = load_e2v_direction(NEU_E2V_PATH, emo_e2v_path, num_samples)
+    e2v = load_e2v_direction(NEU_E2V_PATH, emo_e2v_paths, num_samples)
     e2v = e2v.unsqueeze(0).unsqueeze(0).to(device)
 
     img_source = img_preprocessing(identity_img, 256).to(device)
@@ -764,6 +763,64 @@ def run_single_inference(
 
 
 # ---------------------------------------------------------------------------
+# Custom emotion helpers — emotion2vec on-the-fly feature extraction
+# ---------------------------------------------------------------------------
+
+_E2V_MODEL = None
+
+
+def get_e2v_model():
+    """emotion2vec_plus_large를 한 번만 로드 (lazy)."""
+    global _E2V_MODEL
+    if _E2V_MODEL is None:
+        try:
+            from funasr import AutoModel
+            _E2V_MODEL = AutoModel(model="iic/emotion2vec_plus_large", hub="hf")
+        except ImportError as exc:
+            raise RuntimeError(
+                "funasr가 설치되지 않았습니다. `pip install funasr` 를 실행하세요."
+            ) from exc
+    return _E2V_MODEL
+
+
+def extract_e2v_from_wavs(wav_paths: list, feat_dir: str) -> None:
+    """WAV 목록에서 emotion2vec 특징을 추출해 feat_dir/*.npy 로 저장."""
+    model = get_e2v_model()
+    os.makedirs(feat_dir, exist_ok=True)
+    for wav_path in wav_paths:
+        model.generate(wav_path, output_dir=feat_dir, granularity="utterance")
+
+
+def resolve_e2v_paths(display_name: str, custom_state: list) -> list:
+    """display_name에 대한 emotion2vec 경로 목록 반환.
+
+    커스텀 감정이면 커스텀 경로만, 기존 감정 보강이면 원래 경로 + 추가 경로.
+    커스터마이징 없으면 기존 경로만.
+    """
+    for entry in custom_state:
+        if entry["label"] == display_name:
+            if entry["is_new"]:
+                return [entry["e2v_path"]]
+            else:
+                _, _, original_path = EMOTION_DISPLAY_MAP[display_name]
+                return [original_path, entry["e2v_path"]]
+    if display_name in EMOTION_DISPLAY_MAP:
+        _, _, path = EMOTION_DISPLAY_MAP[display_name]
+        return [path]
+    raise RuntimeError(f"알 수 없는 감정: {display_name}")
+
+
+def _format_customization_status(custom_state: list) -> str:
+    if not custom_state:
+        return "_커스터마이징 없음_"
+    lines = []
+    for entry in custom_state:
+        tag = "🆕 새 감정" if entry["is_new"] else "➕ 기존 감정 보강"
+        lines.append(f"- **{entry['label']}** ({tag})")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Gradio-specific helpers
 # ---------------------------------------------------------------------------
 
@@ -837,6 +894,7 @@ def run_inference_single_page(
     identity_dd, identity_up, audio_dd, audio_up, pose_dd, pose_up,
     selected_display_names, use_sr: bool,
     results_so_far: list,
+    custom_emotions_state: list,
     progress=gr.Progress(track_tqdm=True),
 ):
     """Resolve input, run inference per selected emotion, and append the new
@@ -873,7 +931,7 @@ def run_inference_single_page(
                 (i + 0.1) / total,
                 desc=f"{display_name} 추론 중... ({i + 1}/{total})",
             )
-            _, _, emo_e2v_path = EMOTION_DISPLAY_MAP[display_name]
+            emo_e2v_paths = resolve_e2v_paths(display_name, custom_emotions_state)
             run_idx = base_idx + i
             safe = display_name.replace(" ", "_").replace("[", "").replace("]", "")
             # run_idx keeps filenames unique across separate Run clicks so an
@@ -881,7 +939,7 @@ def run_inference_single_page(
             save_path = f"res/demo_{run_idx:03d}_{safe}.mp4"
 
             sr_path, comparison_path = run_single_inference(
-                identity_img, audio_src, cropped_video, emo_e2v_path, save_path,
+                identity_img, audio_src, cropped_video, emo_e2v_paths, save_path,
                 emotion_name=display_name,
                 use_sr=use_sr,
                 pose_video=pose_src,
@@ -920,6 +978,8 @@ def build_gradio_app() -> gr.Blocks:
 
         # Accumulates across every Run click this session: [{"label", "sr_path", "comparison_path"}, ...]
         results_list_state = gr.State([])
+        # Custom emotion entries: [{"label": str, "e2v_path": str, "is_new": bool}, ...]
+        custom_emotions_state = gr.State([])
 
         # ── Input ──────────────────────────────────────────────────────
         input_mode_radio = gr.Radio(
@@ -1045,6 +1105,43 @@ def build_gradio_app() -> gr.Blocks:
                 visible=False,
                 interactive=False,
             )
+
+        with gr.Accordion("감정 오디오 커스터마이징", open=False):
+            gr.Markdown("### 새 커스텀 감정 추가")
+            gr.Markdown(
+                "WAV 파일을 업로드하면 emotion2vec 특징을 자동 추출하여 새 감정으로 등록합니다."
+            )
+            with gr.Row():
+                custom_emotion_name = gr.Textbox(
+                    label="감정 이름",
+                    placeholder="예: my_emotion",
+                    scale=2,
+                )
+                add_custom_btn = gr.Button("+ 감정 목록에 추가", scale=1, variant="secondary")
+            custom_wav_upload = gr.File(
+                file_types=[".wav"],
+                file_count="multiple",
+                label="WAV 파일 드래그앤드롭 (여러 개 가능)",
+            )
+
+            gr.Markdown("---\n### 기존 감정에 오디오 추가")
+            gr.Markdown(
+                "기존 감정을 선택하고 WAV를 업로드하면 해당 감정의 샘플 풀에 추가됩니다."
+            )
+            with gr.Row():
+                augment_emotion_dd = gr.Dropdown(
+                    choices=EMOTION_DISPLAY_NAMES,
+                    label="보강할 감정 선택",
+                    scale=2,
+                )
+                add_augment_btn = gr.Button("+ 오디오 추가", scale=1, variant="secondary")
+            augment_wav_upload = gr.File(
+                file_types=[".wav"],
+                file_count="multiple",
+                label="WAV 파일 드래그앤드롭 (여러 개 가능)",
+            )
+
+            customization_status_md = gr.Markdown("_커스터마이징 없음_")
 
         sr_checkbox = gr.Checkbox(
             label="Super Resolution 적용 (256 → 512, GFPGAN)",
@@ -1182,6 +1279,72 @@ def build_gradio_app() -> gr.Blocks:
             outputs=[audio_preview],
         )
 
+        def on_add_custom_emotion(name, wav_files, custom_state):
+            name = (name or "").strip()
+            if not name:
+                raise gr.Error("감정 이름을 입력해주세요.")
+            all_existing = list(EMOTION_DISPLAY_MAP.keys()) + [e["label"] for e in custom_state]
+            if name in all_existing:
+                raise gr.Error(f"'{name}'은 이미 존재하는 감정 이름입니다.")
+            if not wav_files:
+                raise gr.Error("WAV 파일을 하나 이상 업로드해주세요.")
+            feat_dir = os.path.join(TMP_CUSTOM_DIR, name, "emotion2vec+large_features")
+            try:
+                wav_paths = [f.name if hasattr(f, "name") else f for f in wav_files]
+                extract_e2v_from_wavs(wav_paths, feat_dir)
+            except RuntimeError as e:
+                raise gr.Error(str(e))
+            updated_state = custom_state + [{"label": name, "e2v_path": feat_dir, "is_new": True}]
+            new_choices = EMOTION_DISPLAY_NAMES + [e["label"] for e in updated_state if e["is_new"]]
+            return (
+                updated_state,
+                gr.update(choices=new_choices),
+                _format_customization_status(updated_state),
+                "",
+                None,
+            )
+
+        def on_add_augment_audio(display_name, wav_files, custom_state):
+            if not display_name:
+                raise gr.Error("보강할 감정을 선택해주세요.")
+            if not wav_files:
+                raise gr.Error("WAV 파일을 하나 이상 업로드해주세요.")
+            safe = display_name.replace(" ", "_").replace("[", "").replace("]", "")
+            feat_dir = os.path.join(TMP_CUSTOM_DIR, f"augment_{safe}", "emotion2vec+large_features")
+            try:
+                wav_paths = [f.name if hasattr(f, "name") else f for f in wav_files]
+                extract_e2v_from_wavs(wav_paths, feat_dir)
+            except RuntimeError as e:
+                raise gr.Error(str(e))
+            updated_state = []
+            found = False
+            for entry in custom_state:
+                if entry["label"] == display_name and not entry["is_new"]:
+                    updated_state.append({**entry, "e2v_path": feat_dir})
+                    found = True
+                else:
+                    updated_state.append(entry)
+            if not found:
+                updated_state.append({"label": display_name, "e2v_path": feat_dir, "is_new": False})
+            return (
+                updated_state,
+                _format_customization_status(updated_state),
+                None,
+            )
+
+        add_custom_btn.click(
+            on_add_custom_emotion,
+            inputs=[custom_emotion_name, custom_wav_upload, custom_emotions_state],
+            outputs=[custom_emotions_state, emotion_checkboxes, customization_status_md,
+                     custom_emotion_name, custom_wav_upload],
+        )
+
+        add_augment_btn.click(
+            on_add_augment_audio,
+            inputs=[augment_emotion_dd, augment_wav_upload, custom_emotions_state],
+            outputs=[custom_emotions_state, customization_status_md, augment_wav_upload],
+        )
+
         # Run inference: append new results onto results_list_state and
         # rebuild the running merge video. Never replaces earlier results.
         run_btn.click(
@@ -1196,6 +1359,7 @@ def build_gradio_app() -> gr.Blocks:
                 pose_asset_dd, pose_upload,
                 emotion_checkboxes, sr_checkbox,
                 results_list_state,
+                custom_emotions_state,
             ],
             outputs=[results_list_state, running_merge_video, status_md],
         )
