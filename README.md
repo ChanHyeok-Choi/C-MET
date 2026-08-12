@@ -45,6 +45,7 @@ Audio-based methods can leverage emotionally rich speech signals—and even bene
 
 ## 🔥 Update
 
+- [2026/08/13] Evaluation code and guide are available.
 - [2026/04/14] Hugging Face [Model](https://huggingface.co/coldhyuk/C-MET) and [Space](https://huggingface.co/spaces/coldhyuk/C-MET) are available.
 - [2026/04/09] [arXiv](https://arxiv.org/abs/2604.07786) is available.
 - [2026/03/07] Data processing and train code are available.
@@ -179,6 +180,8 @@ Here are some examples:
     |       |   |   |-- ...
     ```
 
+      **Important note: our task uses each MEAD identity's *Common Sentences* (files 001-003) and *Generic Sentences* (021-030 per emotion, 031-040 for neutral), following the sentence order described in the MEAD paper's appendix. However, the official MEAD (Part0) release's actual generic-sentence file order does not always match that appendix order. We manually listened to every file and renumbered them to match the appendix order — if you use the official release as-is, without this realignment, your file numbering will not match ours and results will not exactly reproduce.**
+
   2) **CREMA-D**. [download link](https://github.com/CheyneyComputerScience/CREMA-D).
 
       We follow the same preprocessing for all data in CREMA-D datasets.
@@ -231,6 +234,22 @@ Here are some examples:
 
   ```
   tensorboard --logdir ./tensorboard_runs
+  ```
+
+</details>
+
+## 🎬 Evaluation
+<details> <summary> Evaluation </summary>
+
+All evaluation code lives under [`evaluation/`](evaluation/README.md), which has the full step-by-step guide.
+Required output: **FID, FVD, Sync_conf, Accemo**. Quick summary:
+
+- Prepare a CSV (e.g. `dataset/MEAD/ours.csv`, not committed to this repo) that references `dataset/MEAD/test.csv`, storing the path to each file you generated in the 5th column, named `generated_path`.
+- Run the pipeline (frame/face preprocessing → FID → FVD → Emotion accuracy → Sync confidence) as described in [`evaluation/README.md`](evaluation/README.md).
+- Aggregate the final numbers:
+  ```bash
+  cd evaluation
+  python check_quantitative_all.py --csv_path runs/mead_ours/ours.csv
   ```
 
 </details>

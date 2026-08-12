@@ -5,3 +5,14 @@ res
 supp
 MODEL_CARD.md
 upload_to_hf.py
+.omc
+
+# evaluation/ run outputs and third-party pretrained weights
+# (checkpoints are hosted on Google Drive, not committed here)
+evaluation/**/__pycache__/
+evaluation/**/*.pth
+evaluation/**/*.pt
+evaluation/**/*.dat
+evaluation/**/frames/
+evaluation/**/faces/
+evaluation/**/workspace/
