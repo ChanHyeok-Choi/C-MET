@@ -21,6 +21,7 @@
   <a href="https://github.com/chanhyeok-choi/C-MET"><img src="https://img.shields.io/github/stars/chanhyeok-choi/C-MET?style=social"></a> &ensp;
   <a href="https://huggingface.co/coldhyuk/C-MET"><img src="https://img.shields.io/badge/🤗%20HF-Model-yellow"></a> &ensp;
   <a href="https://huggingface.co/spaces/coldhyuk/C-MET"><img src="https://img.shields.io/badge/🤗%20HF-Demo-blue"></a> &ensp;
+  <a href="https://paperswithcode.co/api/v1/papers/2604.07786/leaderboard-badge-link?eval=22683"><img src="https://paperswithcode.co/api/v1/papers/2604.07786/leaderboard-badge.svg?eval=22683&live=1"></a>
 </div>
 
 </div>
